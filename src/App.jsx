@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-0';
+const STORAGE_KEY = 'workflowy-clone-v12-2';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,14 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.0 (Fixed Navigation)', collapsed: false, children: [] },
-      { id: '2', text: 'Try using the Up/Down arrow keys now.', collapsed: false, children: [] },
-      { id: '3', text: 'It should feel snappy and reliable again.', collapsed: false, children: [
-         { id: '3-1', text: 'Nested Item 1', collapsed: false, children: [] },
-         { id: '3-2', text: 'Nested Item 2', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.2 (Conflict-Free Shortcuts)', collapsed: false, children: [] },
+      { id: '2', text: 'Text Selection is restored:', collapsed: false, children: [
+         { id: '2-1', text: 'Ctrl + Shift + Arrows selects words.', collapsed: false, children: [] },
+         { id: '2-2', text: 'Ctrl + Arrows jumps words.', collapsed: false, children: [] }
+      ]},
+      { id: '3', text: 'Zooming is now safe (No browser back button conflict):', collapsed: false, children: [
+         { id: '3-1', text: 'Alt + Shift + Right to Zoom In.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Alt + Shift + Left to Zoom Out.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -158,7 +161,6 @@ export default function App() {
     setCurrentMatchIndex(-1);
     if (searchInputRef.current) searchInputRef.current.blur();
     
-    // Jump to target, last focus, or root
     const dest = targetId || lastFocusRef.current || viewRootId;
     setFocusId(dest);
     setFocusTrigger(t => t + 1);
@@ -190,7 +192,6 @@ export default function App() {
 
   // --- Focus Management ---
   useEffect(() => {
-    // We only focus nodes if the search bar is NOT focused
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
@@ -581,7 +582,7 @@ export default function App() {
         setFocusId(flatList[currentIndex + 1].id);
       }
     }
-    setFocusTrigger(t => t + 1); // Force effect to run even if React batches state
+    setFocusTrigger(t => t + 1);
   };
 
   const handleItemKeyDown = (e, node) => {
@@ -590,11 +591,17 @@ export default function App() {
     if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
 
-    if (e.ctrlKey && e.key === 'ArrowRight') {
+    // Zooming (Alt + Shift + Arrow)
+    if (e.altKey && e.shiftKey && e.key === 'ArrowRight') {
        e.preventDefault();
        setViewRootId(node.id);
        setFocusId(node.id);
     }
+    if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
+       e.preventDefault();
+       handleZoomOut();
+    }
+
     if (e.ctrlKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
@@ -603,10 +610,10 @@ export default function App() {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
-    if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
-    if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
+    if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
+    if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Consolidated Arrow Navigation
+    // Standard Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -626,7 +633,8 @@ export default function App() {
       }
       if (e.key === 'Escape') setShowHelp(false);
       
-      if (e.ctrlKey && e.key === 'ArrowLeft') {
+      // Zoom Out (Alt + Shift + Left)
+      if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
       }
@@ -864,9 +872,10 @@ export default function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={styles.shortcutItem}><span>Ctrl + /</span> <span>Focus Search</span></div>
                 <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
+                <div style={styles.shortcutItem}><span>Alt + Shift + Left/Right</span> <span>Zoom Out / In</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Ctrl + Shift + Down</span> <span>Expand All</span></div>
                 <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
-                <div style={styles.shortcutItem}><span>Ctrl + Right / Left</span> <span>Zoom In / Out</span></div>
                 <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
