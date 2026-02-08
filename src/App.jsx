@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9';
+const STORAGE_KEY = 'workflowy-clone-v9-1';
 
-// Default initial state for a brand new user
+// Default initial state
 const DEFAULT_STATE = {
   tree: {
     id: 'root',
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome! This app now saves your cursor position.', collapsed: false, children: [] },
-      { id: '2', text: 'Try refreshing the page while typing here.', collapsed: false, children: [] },
+      { id: '1', text: 'Welcome! The "Blank Screen" bug is fixed.', collapsed: false, children: [] },
+      { id: '2', text: 'This app now safely loads your state.', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -22,15 +22,19 @@ const DEFAULT_STATE = {
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
 export default function App() {
-  // We initialize state lazily to handle the complex load logic once
+  // --- Lazy State Initialization ---
   const [state, setState] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return DEFAULT_STATE;
 
     try {
       const parsed = JSON.parse(saved);
-      // Backwards compatibility: if user had v8 data (just tree), wrap it
+      // Safety check: ensure parsed object is valid and has a tree
+      if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
+      
+      // Backwards compatibility for older versions (v8 and below)
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
+      
       return parsed;
     } catch (e) {
       console.error("Load failed", e);
@@ -39,14 +43,13 @@ export default function App() {
   });
 
   const [tree, setTree] = useState(state.tree);
-  const [viewRootId, setViewRootId] = useState(state.viewRootId);
+  const [viewRootId, setViewRootId] = useState(state.viewRootId || 'root');
   const [focusId, setFocusId] = useState(state.focusId);
   const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
   // --- Persistence ---
-  // Save EVERYTHING whenever any part of state changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       tree,
@@ -54,6 +57,17 @@ export default function App() {
       focusId
     }));
   }, [tree, viewRootId, focusId]);
+
+  // --- Helpers (Defined before use in useEffect) ---
+  const findNodeAndParent = (root, targetId, parent = null) => {
+    if (!root) return null;
+    if (root.id === targetId) return { node: root, parent };
+    for (const child of root.children || []) {
+      const result = findNodeAndParent(child, targetId, root);
+      if (result) return result;
+    }
+    return null;
+  };
 
   // --- Smart Initialization (Run Once) ---
   useEffect(() => {
@@ -63,28 +77,36 @@ export default function App() {
     // Helper to recursively clean
     const pruneEmpty = (node) => {
       if (!node.children) return;
-      // Filter out children that are empty AND not the focused one
       node.children = node.children.filter(child => {
-        const keep = (child.text.trim() !== '') || (child.id === focusId);
-        if (keep) pruneEmpty(child); // Recurse
+        // Keep if text exists OR if it's the specific node we are focused on
+        const keep = (child.text && child.text.trim() !== '') || (child.id === focusId);
+        if (keep) pruneEmpty(child);
         return keep;
       });
     };
     pruneEmpty(cleanTree);
 
     // 2. SAFETY: Ensure we have a valid focus target
-    // If the saved focusId is missing or invalid, we need a fallback
     let targetId = focusId;
-    const { node: foundFocus } = findNodeAndParent(cleanTree, targetId || 'non-existent');
+    
+    // CRITICAL FIX: Handle null return safely
+    const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
+    const foundFocus = focusResult ? focusResult.node : null;
     
     if (!foundFocus) {
       // Fallback: Find the last node of the current view
-      const { node: viewRoot } = findNodeAndParent(cleanTree, viewRootId);
-      const rootToUse = viewRoot || cleanTree; // Safety fallback to global root
+      const viewResult = findNodeAndParent(cleanTree, viewRootId);
+      // Fallback to root if viewRootId is invalid/deleted
+      const rootToUse = viewResult ? viewResult.node : cleanTree; 
       
+      // If the viewRoot is gone, reset view to global root
+      if (!viewResult && viewRootId !== 'root') {
+        setViewRootId('root');
+      }
+
       if (!rootToUse.children) rootToUse.children = [];
       
-      // If no children, create one. If children exist, focus the last one.
+      // Create new node or focus last existing one
       if (rootToUse.children.length === 0) {
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         rootToUse.children.push(newNode);
@@ -94,7 +116,6 @@ export default function App() {
         if (lastChild.text === '') {
            targetId = lastChild.id;
         } else {
-           // Create new only if last one isn't empty
            const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
            rootToUse.children.push(newNode);
            targetId = newNode.id;
@@ -106,7 +127,8 @@ export default function App() {
     setTree(cleanTree);
     setFocusId(targetId);
     
-  }, []); // Empty dependency array = runs only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
   // --- Focus Management ---
   useEffect(() => {
@@ -117,34 +139,26 @@ export default function App() {
            el.focus();
            const len = el.value.length; 
            el.setSelectionRange(len, len);
-           // Only scroll if needed (prevents jumpiness)
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         }
-      }, 0);
+      }, 50); // Increased timeout slightly for reliability
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Helpers ---
-  const findNodeAndParent = (root, targetId, parent = null) => {
-    if (root.id === targetId) return { node: root, parent };
-    for (const child of root.children || []) {
-      const result = findNodeAndParent(child, targetId, root);
-      if (result) return result;
-    }
-    return null;
-  };
-
+  // --- Additional Helpers ---
   const isDescendant = (tree, sourceId, targetId) => {
-    const { node: sourceNode } = findNodeAndParent(tree, sourceId);
-    if (!sourceNode) return false;
+    const sourceResult = findNodeAndParent(tree, sourceId);
+    if (!sourceResult) return false;
+    const { node: sourceNode } = sourceResult;
+    
     const findInSubtree = (n) => {
       if (n.id === targetId) return true;
-      return n.children.some(findInSubtree);
+      return n.children && n.children.some(findInSubtree);
     };
-    return sourceNode.children.some(findInSubtree);
+    return sourceNode.children && sourceNode.children.some(findInSubtree);
   };
 
   const getFlatList = (rootNode) => {
@@ -162,41 +176,48 @@ export default function App() {
   // --- Actions ---
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
-    const { node } = findNodeAndParent(newTree, id);
-    if (node) node.text = newText;
-    setTree(newTree);
+    const result = findNodeAndParent(newTree, id);
+    if (result && result.node) {
+      result.node.text = newText;
+      setTree(newTree);
+    }
   };
 
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
     const newTree = cloneTree(tree);
-    const { node } = findNodeAndParent(newTree, id);
-    if (node) node.collapsed = !node.collapsed;
-    setTree(newTree);
+    const result = findNodeAndParent(newTree, id);
+    if (result && result.node) {
+      result.node.collapsed = !result.node.collapsed;
+      setTree(newTree);
+    }
   };
   
   const setCollapseState = (id, shouldCollapse) => {
     const newTree = cloneTree(tree);
-    const { node } = findNodeAndParent(newTree, id);
-    if (node) node.collapsed = shouldCollapse;
-    setTree(newTree);
+    const result = findNodeAndParent(newTree, id);
+    if (result && result.node) {
+      result.node.collapsed = shouldCollapse;
+      setTree(newTree);
+    }
   };
 
   const handleZoomOut = () => {
      if (viewRootId === 'root') return;
-     const { parent } = findNodeAndParent(tree, viewRootId);
-     if (parent) {
-       setViewRootId(parent.id);
+     const result = findNodeAndParent(tree, viewRootId);
+     if (result && result.parent) {
+       setViewRootId(result.parent.id);
        setFocusId(viewRootId);
      }
   };
 
   const handleAddFirstChild = () => {
     const newTree = cloneTree(tree);
-    const { node } = findNodeAndParent(newTree, viewRootId);
-    if (!node) return;
+    const result = findNodeAndParent(newTree, viewRootId);
+    if (!result || !result.node) return;
+    
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-    node.children.unshift(newNode);
+    result.node.children.unshift(newNode);
     setTree(newTree);
     setFocusId(newNode.id);
   };
@@ -208,9 +229,9 @@ export default function App() {
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      const { node } = findNodeAndParent(tree, viewRootId);
-      if (node.children && node.children.length > 0) {
-        setFocusId(node.children[0].id);
+      const result = findNodeAndParent(tree, viewRootId);
+      if (result && result.node && result.node.children.length > 0) {
+        setFocusId(result.node.children[0].id);
       }
     }
   };
@@ -219,8 +240,10 @@ export default function App() {
   const handleEnter = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
-    if (!parent) return;
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
     parent.children.splice(index + 1, 0, newNode);
@@ -232,13 +255,16 @@ export default function App() {
     if (text !== '') return;
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
-    if (!parent) return;
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
+    
     if (index > 0) {
       let sibling = parent.children[index - 1];
-      while (!sibling.collapsed && sibling.children.length > 0) {
+      while (!sibling.collapsed && sibling.children && sibling.children.length > 0) {
         sibling = sibling.children[sibling.children.length - 1];
       }
       nextFocusId = sibling.id;
@@ -257,15 +283,21 @@ export default function App() {
   const handleTab = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
-    if (!parent) return;
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     if (index === 0) return;
+    
     const prevSibling = parent.children[index - 1];
     const nodeToMove = parent.children[index];
     parent.children.splice(index, 1);
+    
+    if(!prevSibling.children) prevSibling.children = [];
     prevSibling.children.push(nodeToMove);
     prevSibling.collapsed = false; 
+    
     setTree(newTree);
     setFocusId(id);
     setFocusTrigger(t => t + 1);
@@ -274,10 +306,16 @@ export default function App() {
   const handleShiftTab = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { node, parent } = findNodeAndParent(newTree, id);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { node, parent } = result;
     if (parent.id === viewRootId) return; 
-    const { parent: grandParent } = findNodeAndParent(newTree, parent.id);
-    if (!grandParent) return;
+    
+    const grandParentResult = findNodeAndParent(newTree, parent.id);
+    if (!grandParentResult || !grandParentResult.parent) return;
+    const { parent: grandParent } = grandParentResult;
+
     const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
     const childIndex = parent.children.findIndex(c => c.id === id);
     parent.children.splice(childIndex, 1);
@@ -290,8 +328,10 @@ export default function App() {
   const handleMoveNode = (e, id, direction) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
-    if (!parent) return;
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     if (direction === 'up' && index > 0) {
        const temp = parent.children[index];
@@ -312,7 +352,10 @@ export default function App() {
 
   const handleArrow = (e, id, direction) => {
     e.preventDefault();
-    const { node: viewRoot } = findNodeAndParent(tree, viewRootId);
+    const result = findNodeAndParent(tree, viewRootId);
+    if(!result) return;
+    const { node: viewRoot } = result;
+    
     const flatList = getFlatList(viewRoot);
     const currentIndex = flatList.findIndex(n => n.id === id);
 
@@ -389,12 +432,21 @@ export default function App() {
       alert("Cannot move node into its own child");
       return;
     }
-    const { node: sourceNode, parent: sourceParent } = findNodeAndParent(newTree, draggedId);
-    const { parent: targetParent } = findNodeAndParent(newTree, targetId);
-    if (!sourceParent || !targetParent) return;
+    const sourceResult = findNodeAndParent(newTree, draggedId);
+    const targetResult = findNodeAndParent(newTree, targetId);
+    
+    if (!sourceResult || !sourceResult.parent || !targetResult || !targetResult.parent) return;
+    
+    const { node: sourceNode, parent: sourceParent } = sourceResult;
+    const { parent: targetParent } = targetResult;
+
     const sourceIndex = sourceParent.children.findIndex(c => c.id === draggedId);
     sourceParent.children.splice(sourceIndex, 1);
-    const { parent: freshTargetParent } = findNodeAndParent(newTree, targetId); 
+    
+    // Refresh target parent reference
+    const freshTargetResult = findNodeAndParent(newTree, targetId);
+    const freshTargetParent = freshTargetResult.parent;
+    
     const targetIndex = freshTargetParent.children.findIndex(c => c.id === targetId);
     freshTargetParent.children.splice(targetIndex, 0, sourceNode);
     setTree(newTree);
@@ -437,7 +489,7 @@ export default function App() {
           />
         </div>
         {!node.collapsed && (
-          <div style={styles.childrenBorder}>{node.children.map(child => renderNode(child))}</div>
+          <div style={styles.childrenBorder}>{node.children && node.children.map(child => renderNode(child))}</div>
         )}
       </div>
     );
@@ -448,9 +500,13 @@ export default function App() {
     const path = [];
     let curr = viewRootId;
     while(curr) {
-      const { node, parent } = findNodeAndParent(tree, curr);
-      if(node) path.unshift(node);
-      curr = parent ? parent.id : null;
+      const result = findNodeAndParent(tree, curr);
+      if(result && result.node) {
+        path.unshift(result.node);
+        curr = result.parent ? result.parent.id : null;
+      } else {
+        curr = null;
+      }
     }
     return (
       <div style={styles.breadcrumbs}>
@@ -488,8 +544,9 @@ export default function App() {
     </div>
   );
 
-  const { node: currentViewNode } = findNodeAndParent(tree, viewRootId);
-  if (!currentViewNode) return <div>Loading...</div>;
+  const viewResult = findNodeAndParent(tree, viewRootId);
+  if (!viewResult || !viewResult.node) return <div>Loading or Invalid State (Try Clearing Cache)...</div>;
+  const currentViewNode = viewResult.node;
 
   return (
     <div style={styles.container}>
@@ -514,9 +571,9 @@ export default function App() {
           </div>
         )}
         
-        {currentViewNode.children.map(child => renderNode(child))}
+        {currentViewNode.children && currentViewNode.children.map(child => renderNode(child))}
         
-        {currentViewNode.children.length === 0 && (
+        {(!currentViewNode.children || currentViewNode.children.length === 0) && (
            <div style={styles.emptyState} onClick={handleAddFirstChild}>
              <em>Empty. Click here or press Enter to add items.</em>
            </div>
