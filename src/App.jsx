@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-28';
+const STORAGE_KEY = 'workflowy-clone-v13-29';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,17 +10,16 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.28 (Deep Linking Enabled)', collapsed: false, children: [] },
-      { id: '2', text: 'Look at your browser address bar.', collapsed: false, children: [] },
-      { id: '3', text: 'Zoom into this node.', collapsed: false, children: [
-         { id: '3-1', text: 'Notice the URL changed to match this node ID.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Now press the Browser "Back" button.', collapsed: false, children: [] },
-         { id: '3-3', text: 'It zooms you out instead of leaving the page.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.29 (Performance Fix)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "Layout Thrashing" bug.', collapsed: false, children: [] },
+      { id: '3', text: 'Deep Zoom Test:', collapsed: false, children: [
+         { id: '3-1', text: 'You can now zoom in/out of deep lists without freezing.', collapsed: false, children: [] },
+         { id: '3-2', text: 'The cursor ghosts are gone because the render loop is optimized.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'You can now bookmark specific lists and share deep links (if you implement a backend later).', collapsed: false, children: [] }
+      { id: '4', text: 'All previous features (Deep Links, Import/Export, Smart Paste) remain active.', collapsed: false, children: [] }
     ]
   },
-  // viewRootId is managed by state init now to support deep linking on load
+  viewRootId: 'root',
   focusId: null,
   darkMode: false
 };
@@ -92,7 +91,6 @@ export default function App() {
     try {
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
-      // Ensure tree structure is valid
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
       return parsed;
     } catch (e) {
@@ -103,10 +101,9 @@ export default function App() {
 
   const [tree, setTree] = useState(state.tree);
   
-  // -- DEEP LINKING: Initialize View from URL Hash --
+  // -- DEEP LINKING --
   const [viewRootId, setViewRootId] = useState(() => {
     const hash = window.location.hash.replace('#', '');
-    // Priority: URL Hash -> Saved State -> 'root'
     return hash || (state.viewRootId || 'root');
   });
 
@@ -139,15 +136,12 @@ export default function App() {
   }, [tree, viewRootId, focusId, darkMode]);
 
   // --- DEEP LINKING EFFECTS ---
-  
-  // 1. Sync URL when viewRootId changes
   useEffect(() => {
     if (viewRootId) {
         window.location.hash = viewRootId;
     }
   }, [viewRootId]);
 
-  // 2. Handle Browser Back/Forward Buttons
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
@@ -160,7 +154,6 @@ export default function App() {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [viewRootId]);
-
 
   // --- Track Last Focus ---
   useEffect(() => {
@@ -219,10 +212,19 @@ export default function App() {
     return null;
   };
 
+  // --- PERFORMANCE OPTIMIZED ADJUST HEIGHT ---
   const adjustHeight = (el) => {
     if (!el) return;
+    
+    // Read cached value to avoid layout thrashing
+    const prevVal = el.getAttribute('data-prev-val');
+    if (prevVal === el.value) return; // Skip if text hasn't changed
+
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
+    
+    // Update cache
+    el.setAttribute('data-prev-val', el.value);
   };
 
   // --- Search Logic ---
@@ -303,7 +305,11 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
-             adjustHeight(el);
+             // Force adjust height on focus to be safe
+             el.style.height = 'auto';
+             el.style.height = el.scrollHeight + 'px';
+             el.setAttribute('data-prev-val', el.value);
+
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -345,18 +351,14 @@ export default function App() {
     };
     pruneEmpty(cleanTree);
 
-    // If current viewRootId is invalid (deleted from saved state), fallback to root
     let targetId = focusId;
     const viewResult = findNodeAndParent(cleanTree, viewRootId);
-    if (!viewResult) {
-        setViewRootId('root');
-    }
+    if (!viewResult) setViewRootId('root');
 
     const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
     const foundFocus = focusResult ? focusResult.node : null;
     
     if (!foundFocus) {
-      // Find fallback focus
       const rootToUse = viewResult ? viewResult.node : cleanTree; 
       if (!rootToUse.children) rootToUse.children = [];
       if (rootToUse.children.length === 0) {
@@ -427,7 +429,7 @@ export default function App() {
     });
   };
 
-  // --- SMART PASTE HANDLER ---
+  // --- SMART PASTE ---
   const handlePaste = (e, id) => {
     const pastedData = e.clipboardData.getData('Text');
     if (!pastedData.includes('\n')) return;
@@ -452,7 +454,7 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  // --- CLEANUP LOGIC ON BLUR ---
+  // --- CLEANUP ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
@@ -462,7 +464,6 @@ export default function App() {
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
-        
         if (!result || !result.node) return prev;
 
         if (result && result.node) {
@@ -475,9 +476,7 @@ export default function App() {
             
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
-                if (idx !== -1) {
-                    result.parent.children.splice(idx, 1);
-                }
+                if (idx !== -1) result.parent.children.splice(idx, 1);
             } else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
@@ -687,7 +686,6 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
-    // FIX: Skip blur for ALL Enter actions to protect structural integrity
     skipBlurRef.current = true;
 
     setTree(prev => {
@@ -695,9 +693,7 @@ export default function App() {
         const currentResult = findNodeAndParent(newTree, id);
         if (!currentResult || !currentResult.node) return prev;
         
-        if (currentResult.node.text === '') {
-            return prev;
-        }
+        if (currentResult.node.text === '') return prev;
 
         const { node, parent } = currentResult;
         const index = parent.children.findIndex(c => c.id === id);
@@ -709,7 +705,6 @@ export default function App() {
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
-            // INSERT ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
@@ -723,7 +718,6 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else if (shouldSplitIntoChild) {
-            // SPLIT TO CHILD
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -736,7 +730,6 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
-            // SPLIT TO SIBLING
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -785,8 +778,6 @@ export default function App() {
         
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
-          
-          // CONTEXT AWARE BACKSPACE (Move In)
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
@@ -799,14 +790,11 @@ export default function App() {
               return newTree;
           }
 
-          // MERGE
           let cursorTarget = prevSibling.text.length; 
-          
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
               prevSibling.text += " ";
               cursorTarget += 1;
           }
-          
           prevSibling.text += node.text;
           parent.children.splice(index, 1);
           
@@ -821,7 +809,6 @@ export default function App() {
               cursorGoalRef.current = cursorTarget;
               setFocusTrigger(t => t + 1);
           }, 0);
-          
           return newTree;
         } else {
           if (parent.id !== viewRootId) {
@@ -1152,7 +1139,7 @@ export default function App() {
             </div>
 
             <textarea
-              // FIX: Auto-adjust height ALWAYS (even if not focused) to snap shut on remote updates
+              // OPTIMIZATION: Check data-prev-val before touching DOM height
               ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
