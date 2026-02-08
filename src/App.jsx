@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-9';
+const STORAGE_KEY = 'workflowy-clone-v12-0';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.9 (Smart Resume)', collapsed: false, children: [] },
-      { id: '2', text: 'Test 1: Click this node, then click search (or Ctrl+/), then hit Escape.', collapsed: false, children: [
-         { id: '2-1', text: 'Focus should return exactly HERE.', collapsed: false, children: [] }
-      ]},
-      { id: '3', text: 'Test 2: Click this node, then click the blank background outside.', collapsed: false, children: [
-         { id: '3-1', text: 'Now hit Enter. Focus snaps back here instead of making a new node.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.0 (Fixed Navigation)', collapsed: false, children: [] },
+      { id: '2', text: 'Try using the Up/Down arrow keys now.', collapsed: false, children: [] },
+      { id: '3', text: 'It should feel snappy and reliable again.', collapsed: false, children: [
+         { id: '3-1', text: 'Nested Item 1', collapsed: false, children: [] },
+         { id: '3-2', text: 'Nested Item 2', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -61,8 +60,6 @@ export default function App() {
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   const searchInputRef = useRef(null);
-  
-  // NEW: Ref to track the last valid node we were editing
   const lastFocusRef = useRef(null);
 
   // --- Persistence ---
@@ -77,12 +74,10 @@ export default function App() {
 
   // --- Track Last Focus ---
   useEffect(() => {
-    // Whenever focusId changes to a valid node (not null), save it.
-    // We ignore 'root' or viewRootId usually, but saving them is fine too as fallback.
-    if (focusId) {
+    if (focusId && focusId !== viewRootId) {
       lastFocusRef.current = focusId;
     }
-  }, [focusId]);
+  }, [focusId, viewRootId]);
 
   // --- Theme ---
   const theme = darkMode ? {
@@ -157,20 +152,14 @@ export default function App() {
   }, [searchQuery]); 
 
   // --- Search Actions ---
-  
   const exitSearch = (targetId = null) => {
     setSearchQuery('');
     setMatchIds([]);
     setCurrentMatchIndex(-1);
-    
     if (searchInputRef.current) searchInputRef.current.blur();
     
-    // Logic:
-    // 1. If targetId is passed (Enter on match), go there.
-    // 2. If not, try to go back to lastFocusRef (where we were before searching).
-    // 3. If neither, fallback to viewRoot.
+    // Jump to target, last focus, or root
     const dest = targetId || lastFocusRef.current || viewRootId;
-    
     setFocusId(dest);
     setFocusTrigger(t => t + 1);
   };
@@ -178,7 +167,7 @@ export default function App() {
   const handleSearchKeyDown = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      exitSearch(); // Will use lastFocusRef
+      exitSearch();
       return;
     }
     if (matchIds.length === 0) return;
@@ -194,14 +183,14 @@ export default function App() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
-        const targetId = matchIds[currentMatchIndex];
-        exitSearch(targetId); // Jump to specific match
+        exitSearch(matchIds[currentMatchIndex]);
       }
     }
   };
 
   // --- Focus Management ---
   useEffect(() => {
+    // We only focus nodes if the search bar is NOT focused
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
@@ -288,6 +277,29 @@ export default function App() {
   };
 
   // --- Handlers ---
+  const isDescendant = (tree, sourceId, targetId) => {
+    const sourceResult = findNodeAndParent(tree, sourceId);
+    if (!sourceResult) return false;
+    const { node: sourceNode } = sourceResult;
+    const findInSubtree = (n) => {
+      if (n.id === targetId) return true;
+      return n.children && n.children.some(findInSubtree);
+    };
+    return sourceNode.children && sourceNode.children.some(findInSubtree);
+  };
+
+  const getFlatList = (rootNode) => {
+    const list = [];
+    const traverse = (node) => {
+      if (node.id !== rootNode.id) list.push(node);
+      if (!node.collapsed && node.children) {
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(rootNode);
+    return list;
+  };
+
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -569,6 +581,7 @@ export default function App() {
         setFocusId(flatList[currentIndex + 1].id);
       }
     }
+    setFocusTrigger(t => t + 1); // Force effect to run even if React batches state
   };
 
   const handleItemKeyDown = (e, node) => {
@@ -593,6 +606,7 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
+    // Consolidated Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -624,12 +638,10 @@ export default function App() {
         e.preventDefault();
         handleCollapseAll();
       }
-      // Global Enter (Resume editing or add new)
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
            e.preventDefault();
-           // NEW LOGIC: Restore focus to last active node if possible
            if (lastFocusRef.current) {
              const exists = findNodeAndParent(tree, lastFocusRef.current);
              if (exists && exists.node) {
@@ -638,13 +650,10 @@ export default function App() {
                return;
              }
            }
-           
-           // Fallback to old logic (add first child)
            const result = findNodeAndParent(tree, viewRootId);
            if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
                handleAddFirstChild();
            } else if (result && result.node && result.node.children.length > 0) {
-               // Focus first child if exists
                setFocusId(result.node.children[0].id);
                setFocusTrigger(t => t+1);
            }
