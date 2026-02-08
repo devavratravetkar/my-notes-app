@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-4';
+const STORAGE_KEY = 'workflowy-clone-v13-5';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.4 (Navigation Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Arrow Up now reliably jumps to the previous node when at the start of a line.', collapsed: false, children: [] },
-      { id: '3', text: 'Arrow Down jumps to the next node when at the end.', collapsed: false, children: [
-         { id: '3-1', text: 'Test it on these nested items.', collapsed: false, children: [] },
-         { id: '3-2', text: 'It should feel fluid and native.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.5 (Split on Enter)', collapsed: false, children: [] },
+      { id: '2', text: 'Place your cursor in the middle of this long sentence and hit Enter.', collapsed: false, children: [] },
+      { id: '3', text: 'It should split this node into two separate nodes seamlessly.', collapsed: false, children: [
+         { id: '3-1', text: 'Works at the start of a line too (pushes text down).', collapsed: false, children: [] },
+         { id: '3-2', text: 'Works at the end of a line (standard new item).', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -202,21 +202,18 @@ export default function App() {
   // --- Focus Management ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
-      // Small timeout allows DOM to update before we grab focus
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
              adjustHeight(el);
-             // Apply cursor goal if set by keyboard navigation
              if (cursorGoalRef.current === 'start') {
                el.setSelectionRange(0, 0);
              } else if (cursorGoalRef.current === 'end') {
                const len = el.value.length;
                el.setSelectionRange(len, len);
              }
-             // Clear goal so mouse clicks work normally
              cursorGoalRef.current = null;
            }
            
@@ -235,7 +232,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization ---
+  // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -464,23 +461,46 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
+  // --- SPLIT ON ENTER IMPLEMENTATION ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
-    if (currentResult && currentResult.node && currentResult.node.text === '') {
-       handleShiftTab(e, id);
-       return;
-    }
-    const newTree = cloneTree(tree);
-    const result = findNodeAndParent(newTree, id);
-    if (!result || !result.parent) return;
-    const { parent } = result;
+    
+    // Safety check for root/null
+    if (!currentResult || !currentResult.node) return;
+    
+    const { node, parent } = currentResult;
     const index = parent.children.findIndex(c => c.id === id);
-    const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-    parent.children.splice(index + 1, 0, newNode);
+    
+    // Get cursor position for splitting
+    const el = e.target; // The textarea
+    const cursor = el.selectionStart || 0;
+    const text = node.text || '';
+    
+    const textBefore = text.slice(0, cursor);
+    const textAfter = text.slice(cursor);
+
+    if (textBefore.trim() === '' && textAfter.trim() === '' && node.children.length === 0) {
+        // Just indent if empty? Or standard outliner "Tab" logic?
+        // Actually for empty node, Shift+Tab is standard if at depth, otherwise just do nothing or insert new.
+        // We'll stick to basic new node logic but optimized.
+    }
+
+    const newTree = cloneTree(tree);
+    const resultInNewTree = findNodeAndParent(newTree, id);
+    const parentInNewTree = resultInNewTree.parent;
+    const nodeInNewTree = resultInNewTree.node;
+
+    // UPDATE Current Node Text
+    nodeInNewTree.text = textBefore;
+
+    // CREATE New Node with trailing text
+    const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
+    parentInNewTree.children.splice(index + 1, 0, newNode);
+
     setTree(newTree);
     setFocusId(newNode.id);
-    cursorGoalRef.current = 'start';
+    cursorGoalRef.current = 'start'; // Cursor goes to start of the new split part
     setFocusTrigger(t => t + 1);
   };
 
@@ -490,11 +510,13 @@ export default function App() {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
+    
     if (result.node.children && result.node.children.length > 0) {
       result.node.text = "..."; 
       setTree(newTree);
       return; 
     }
+
     const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
@@ -595,13 +617,11 @@ export default function App() {
   };
 
   const handleArrow = (e, id, direction) => {
-    // Robust check: use currentTarget to guarantee we're checking the textarea
-    const el = e.currentTarget; 
+    const el = e.currentTarget;
     if (el) {
       const { selectionStart, value } = el;
-      // Allow moving cursor inside text if we are NOT at the boundary
-      if (direction === 'up' && selectionStart > 0) return;
-      if (direction === 'down' && selectionStart < value.length) return;
+      if (direction === 'up' && selectionStart > 0) return; 
+      if (direction === 'down' && selectionStart < value.length) return; 
     }
 
     e.preventDefault();
@@ -610,11 +630,10 @@ export default function App() {
     const { node: viewRoot } = result;
     const flatList = getFlatList(viewRoot);
     const currentIndex = flatList.findIndex(n => n.id === id);
-    
     if (direction === 'up') {
       if (currentIndex > 0) {
         setFocusId(flatList[currentIndex - 1].id);
-        cursorGoalRef.current = 'end'; // When going up, land at end of previous line
+        cursorGoalRef.current = 'end';
       } else if (viewRootId !== 'root') {
         setFocusId(viewRootId);
         cursorGoalRef.current = 'end';
@@ -622,7 +641,7 @@ export default function App() {
     } else if (direction === 'down') {
       if (currentIndex < flatList.length - 1) {
         setFocusId(flatList[currentIndex + 1].id);
-        cursorGoalRef.current = 'start'; // When going down, land at start of next line
+        cursorGoalRef.current = 'start';
       }
     }
     setFocusTrigger(t => t + 1);
@@ -657,7 +676,6 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
