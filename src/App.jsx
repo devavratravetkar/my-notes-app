@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9-6';
+const STORAGE_KEY = 'workflowy-clone-v9-7';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,8 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Fixed: You can now press Enter on an empty screen!', collapsed: false, children: [] },
-      { id: '2', text: 'Note: Multi-node text selection is limited due to browser constraints (Input vs ContentEditable).', collapsed: false, children: [] },
+      { id: '1', text: 'Try to erase the text below completely, then click away.', collapsed: false, children: [] },
+      { id: '2', text: '...', collapsed: false, children: [
+        { id: '2-1', text: 'I am a child node.', collapsed: false, children: [] },
+      ]},
+      { id: '3', text: 'It will automatically revert to "..." to prevent ghost nodes.', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -70,7 +73,6 @@ export default function App() {
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
-        // Keep if text exists OR is focused OR has children (Safety)
         const hasText = child.text && child.text.trim() !== '';
         const isFocused = child.id === focusId;
         const hasChildren = child.children && child.children.length > 0;
@@ -166,6 +168,19 @@ export default function App() {
     }
   };
 
+  // NEW: Handle Blur to prevent ghost parents
+  const handleBlur = (id) => {
+    const newTree = cloneTree(tree);
+    const result = findNodeAndParent(newTree, id);
+    if (result && result.node) {
+      // If node is empty BUT has children, reset text to "..."
+      if (result.node.text.trim() === '' && result.node.children && result.node.children.length > 0) {
+        result.node.text = "...";
+        setTree(newTree);
+      }
+    }
+  };
+
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
     const newTree = cloneTree(tree);
@@ -195,7 +210,6 @@ export default function App() {
         const focusResult = findNodeAndParent(newTree, focusId);
         if (focusResult && focusResult.node && focusResult.parent) {
            const { node, parent } = focusResult;
-           // Condition: Empty Text AND No Children (Safe to delete)
            if (node.text.trim() === '' && (!node.children || node.children.length === 0)) {
                const index = parent.children.findIndex(c => c.id === focusId);
                if (index !== -1) {
@@ -421,26 +435,22 @@ export default function App() {
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // Help
       if (e.altKey && e.key === '/') {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
       
-      // Zoom Out
       if (e.ctrlKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
       }
 
-      // Enter on Empty State (Restored!)
+      // Enter on Empty State (Restored)
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        // If we are NOT in an input (e.g. body focus because everything deleted)
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
            const result = findNodeAndParent(tree, viewRootId);
-           // If current view is empty or just has no children
            if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
                e.preventDefault();
                handleAddFirstChild();
@@ -519,6 +529,7 @@ export default function App() {
             value={node.text}
             onChange={(e) => handleUpdateText(node.id, e.target.value)}
             onKeyDown={(e) => handleItemKeyDown(e, node)}
+            onBlur={() => handleBlur(node.id)} // Added blur handler
             style={styles.input} autoComplete="off"
           />
         </div>
