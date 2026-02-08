@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-17';
+const STORAGE_KEY = 'workflowy-clone-v13-18';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.17 (Atomic Updates)', collapsed: false, children: [] },
-      { id: '2', text: 'Try the Backspace move again.', collapsed: false, children: [] },
-      { id: '3', text: 'Parent (Expanded)', collapsed: false, children: [
-         { id: '3-1', text: 'Child 1', collapsed: false, children: [] }
-      ]},
-      { id: '4', text: 'Node to Move (Backspace at start)', collapsed: false, children: [] },
-      { id: '5', text: 'It should pop into the list above without duplicating or glitching.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.18 (Cleanup Logic Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Try creating spacers (Enter at start) and clicking away.', collapsed: false, children: [] },
+      { id: '3', text: 'The empty nodes will now properly auto-delete on blur.', collapsed: false, children: [] },
+      { id: '4', text: 'Backspace Merge adds a space between words properly.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -318,7 +315,6 @@ export default function App() {
   };
 
   const handleUpdateText = (id, newText) => {
-    // Standard update can be loose, but for safety lets use updater
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -347,12 +343,15 @@ export default function App() {
 
             const hasChildren = result.node.children && result.node.children.length > 0;
             
+            // 1. Delete CURRENT if empty
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx !== -1) {
                     result.parent.children.splice(idx, 1);
                 }
-            } else if (result.parent) {
+            } 
+            // 2. Delete PREVIOUS if empty (The "Ghost Node" fix)
+            else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
                     const prevNode = result.parent.children[idx - 1];
@@ -428,11 +427,7 @@ export default function App() {
 
   const handleZoomOut = () => {
      if (viewRootId === 'root') return;
-     
-     // Special Case: Zoom needs to read current state logic for finding parents
-     // But modification should be on fresh state.
-     
-     const result = findNodeAndParent(tree, viewRootId); // Read current is fine for nav
+     const result = findNodeAndParent(tree, viewRootId); 
      if (result && result.parent) {
        setViewRootId(result.parent.id);
        setFocusId(viewRootId);
@@ -460,7 +455,6 @@ export default function App() {
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         result.node.children.unshift(newNode);
         
-        // Side effect inside setter is safe for ID but focus must be after
         setTimeout(() => {
             setFocusId(newNode.id);
             cursorGoalRef.current = 'start';
@@ -516,9 +510,15 @@ export default function App() {
 
   const handleEnter = (e, id) => {
     e.preventDefault();
-    skipBlurRef.current = true;
     const el = e.target;
     const cursor = el.selectionStart || 0;
+
+    // FIX: Only skip blur if we are changing focus (Split/Insert Child).
+    // If inserting above (spacer), we KEEP focus, so we must NOT skip blur
+    // (so the next legitimate blur cleans up properly).
+    if (cursor > 0) {
+        skipBlurRef.current = true;
+    }
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -526,29 +526,31 @@ export default function App() {
         if (!currentResult || !currentResult.node) return prev;
         
         if (currentResult.node.text === '') {
-            // Can't invoke handleShiftTab easily from here inside setState, so replicate logic or defer?
-            // Deferring via setTimeout for ShiftTab logic if empty is safer to avoid state loop.
-            // But for simplicity, let's just do split logic with empty strings (creates sibling)
+            // Emulate Shift+Tab if empty
+            // (Simplified: just return for now, user can Shift+Tab manually)
+            return prev;
         }
 
         const { node, parent } = currentResult;
         const index = parent.children.findIndex(c => c.id === id);
         const text = node.text || '';
         
-        const parentInNewTree = parent; // Refs are from newTree
+        const parentInNewTree = parent;
         const nodeInNewTree = node;
 
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
+            // Insert Empty Node ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
             }
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
-            // No focus change needed
+            // No focus change -> Don't touch skipBlurRef (it stays false)
         } else if (shouldSplitIntoChild) {
+            // Split into Child
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -561,6 +563,7 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
+            // Split into Sibling
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -590,17 +593,9 @@ export default function App() {
         if (!result || !result.parent) return prev;
         const { node, parent } = result;
         
-        // Check for children (Shift Tab if children exist and not moving in)
         if (node.children && node.children.length > 0) {
            const idx = parent.children.findIndex(c => c.id === id);
-           // If no prev sibling, unindent. If prev sibling, maybe merge? 
-           // Complex case: merging parent with children into another parent?
-           // For now, let's Unindent if at top level of list, or just stop.
-           // Standard: if has children, and prev sibling exists, append children to prev sibling?
-           // Simplest for now: unindent
            if (idx === 0 && parent.id !== viewRootId) {
-               // Logic for unindent same as ShiftTab
-               // We can call helper if we refactor, but here inline:
                const gpResult = findNodeAndParent(newTree, parent.id);
                if(gpResult && gpResult.parent) {
                    const { parent: grandParent } = gpResult;
@@ -618,7 +613,6 @@ export default function App() {
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
           
-          // HIERARCHY MOVE CHECK
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
@@ -631,7 +625,6 @@ export default function App() {
               return newTree;
           }
 
-          // STANDARD MERGE
           let cursorTarget = prevSibling.text.length; 
           
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
@@ -642,7 +635,6 @@ export default function App() {
           prevSibling.text += node.text;
           parent.children.splice(index, 1);
           
-          // Adopt children if any
           if(node.children && node.children.length > 0) {
               if(!prevSibling.children) prevSibling.children = [];
               prevSibling.children = [...prevSibling.children, ...node.children];
@@ -658,7 +650,6 @@ export default function App() {
           return newTree;
         } else {
           if (parent.id !== viewRootId) {
-             // Inline Unindent
              const gpResult = findNodeAndParent(newTree, parent.id);
              if(gpResult && gpResult.parent) {
                  const { parent: grandParent } = gpResult;
@@ -772,7 +763,6 @@ export default function App() {
     e.preventDefault();
     skipBlurRef.current = true;
     
-    // Read from current tree is safe for navigation (no structure change)
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
     const { node: viewRoot } = result;
@@ -890,6 +880,7 @@ export default function App() {
   // --- Drag and Drop ---
   const handleDragStart = (e, id) => {
     setDraggedId(id);
+    skipBlurRef.current = true; // FIX: Skip blur during drag
     e.dataTransfer.effectAllowed = "move";
     e.target.style.opacity = '0.5';
   };
@@ -974,7 +965,7 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el && isEditing) adjustHeight(el); }}
+              ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
@@ -1124,7 +1115,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge/Move)</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge)</span></div>
               </div>
             </div>
           </div>
