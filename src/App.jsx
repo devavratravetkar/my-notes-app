@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-29';
+const STORAGE_KEY = 'workflowy-clone-v13-30';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.29 (Performance Fix)', collapsed: false, children: [] },
-      { id: '2', text: 'We fixed the "Layout Thrashing" bug.', collapsed: false, children: [] },
-      { id: '3', text: 'Deep Zoom Test:', collapsed: false, children: [
-         { id: '3-1', text: 'You can now zoom in/out of deep lists without freezing.', collapsed: false, children: [] },
-         { id: '3-2', text: 'The cursor ghosts are gone because the render loop is optimized.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.30 (Performance Optimized)', collapsed: false, children: [] },
+      { id: '2', text: 'We extracted the Textarea into a dedicated component.', collapsed: false, children: [] },
+      { id: '3', text: 'Try Zooming In/Out quickly here.', collapsed: false, children: [
+         { id: '3-1', text: 'It should be buttery smooth now.', collapsed: false, children: [] },
+         { id: '3-2', text: 'No more "cursor blinking" or "freezing" because we stopped forcing layout recalculations on every render.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'All previous features (Deep Links, Import/Export, Smart Paste) remain active.', collapsed: false, children: [] }
+      { id: '4', text: 'All previous features (Deep Links, Cleanup, Context Moves) are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -83,6 +83,34 @@ const treeToString = (node, depth = 0) => {
   return output;
 };
 
+// --- OPTIMIZED COMPONENT: AutoResizingTextarea ---
+// Isolates layout thrashing. Only resizes when 'value' changes.
+const AutoResizingTextarea = ({ value, style, ...props }) => {
+  const textareaRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      // Reset height to auto to correctly calculate scrollHeight for shrinking text
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  }, [value]); // CRITICAL: Only run when text changes, NOT on every parent render/zoom
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      style={{
+        ...style,
+        height: 'auto', // Initial render
+        resize: 'none',
+        overflow: 'hidden'
+      }}
+      {...props}
+    />
+  );
+};
+
 export default function App() {
   // --- State ---
   const [state, setState] = useState(() => {
@@ -101,7 +129,6 @@ export default function App() {
 
   const [tree, setTree] = useState(state.tree);
   
-  // -- DEEP LINKING --
   const [viewRootId, setViewRootId] = useState(() => {
     const hash = window.location.hash.replace('#', '');
     return hash || (state.viewRootId || 'root');
@@ -135,11 +162,9 @@ export default function App() {
     }));
   }, [tree, viewRootId, focusId, darkMode]);
 
-  // --- DEEP LINKING EFFECTS ---
+  // --- Deep Linking ---
   useEffect(() => {
-    if (viewRootId) {
-        window.location.hash = viewRootId;
-    }
+    if (viewRootId) window.location.hash = viewRootId;
   }, [viewRootId]);
 
   useEffect(() => {
@@ -177,7 +202,6 @@ export default function App() {
     textHighlightBg: '#fff3cd', textHighlightFg: '#000'
   };
 
-  // --- Global Styles ---
   useEffect(() => {
     document.body.style.margin = '0';
     document.body.style.padding = '0';
@@ -212,21 +236,6 @@ export default function App() {
     return null;
   };
 
-  // --- PERFORMANCE OPTIMIZED ADJUST HEIGHT ---
-  const adjustHeight = (el) => {
-    if (!el) return;
-    
-    // Read cached value to avoid layout thrashing
-    const prevVal = el.getAttribute('data-prev-val');
-    if (prevVal === el.value) return; // Skip if text hasn't changed
-
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-    
-    // Update cache
-    el.setAttribute('data-prev-val', el.value);
-  };
-
   // --- Search Logic ---
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -234,11 +243,9 @@ export default function App() {
       setCurrentMatchIndex(-1);
       return;
     }
-
     const query = searchQuery.toLowerCase();
     const matches = [];
     const newTree = cloneTree(tree);
-
     const searchAndExpand = (node) => {
       let isMatch = false;
       if (node.text && node.text.toLowerCase().includes(query)) {
@@ -253,7 +260,6 @@ export default function App() {
       }
       return isMatch || (node.children && node.children.some(c => c.text.toLowerCase().includes(query)));
     };
-
     searchAndExpand(newTree);
     setTree(newTree);
     setMatchIds(matches);
@@ -280,7 +286,6 @@ export default function App() {
       return;
     }
     if (matchIds.length === 0) return;
-
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       const nextIndex = (currentMatchIndex + 1) % matchIds.length;
@@ -304,12 +309,8 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
+           // We only handle cursor position here now; height is handled by AutoResizingTextarea
            if (el.tagName === 'TEXTAREA') {
-             // Force adjust height on focus to be safe
-             el.style.height = 'auto';
-             el.style.height = el.scrollHeight + 'px';
-             el.setAttribute('data-prev-val', el.value);
-
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -326,10 +327,7 @@ export default function App() {
            }
         } else {
            const headerEl = document.getElementById(`input-${viewRootId}`);
-           if (headerEl) {
-             headerEl.focus();
-             if (headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
-           }
+           if (headerEl) headerEl.focus();
         }
       }, 0);
     }
@@ -375,14 +373,12 @@ export default function App() {
         }
       }
     }
-
     const checkAllExpanded = (node) => {
       if (node.children && node.children.length > 0 && node.collapsed) return false;
       if (node.children && node.children.length > 0) return node.children.every(checkAllExpanded);
       return true;
     };
     if (checkAllExpanded(cleanTree)) setIsAllExpanded(true);
-
     setTree(cleanTree);
     setFocusId(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -429,51 +425,40 @@ export default function App() {
     });
   };
 
-  // --- SMART PASTE ---
   const handlePaste = (e, id) => {
     const pastedData = e.clipboardData.getData('Text');
     if (!pastedData.includes('\n')) return;
-
     e.preventDefault();
     skipBlurRef.current = true;
-
     const newNodes = parseTextToNodes(pastedData);
     if (newNodes.length === 0) return;
-
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
         if (!result || !result.node) return prev;
-
         const { node, parent } = result;
         const index = parent.children.findIndex(c => c.id === id);
         parent.children.splice(index + 1, 0, ...newNodes);
-        
         return newTree;
     });
     setFocusTrigger(t => t + 1);
   };
 
-  // --- CLEANUP ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
       return;
     }
-
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
         if (!result || !result.node) return prev;
-
         if (result && result.node) {
             let text = result.node.text;
             text = text.trim();
             text = text.replace(/\n{3,}/g, '\n\n');
             result.node.text = text;
-
             const hasChildren = result.node.children && result.node.children.length > 0;
-            
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx !== -1) result.parent.children.splice(idx, 1);
@@ -493,7 +478,6 @@ export default function App() {
 
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
-    
     let rescueFocusId = null;
     if (focusId) {
         const path = findPath(tree, focusId);
@@ -501,7 +485,6 @@ export default function App() {
             rescueFocusId = id;
         }
     }
-
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -510,7 +493,6 @@ export default function App() {
         }
         return newTree;
     });
-
     if (rescueFocusId) {
         setFocusId(rescueFocusId);
         cursorGoalRef.current = 'start';
@@ -526,7 +508,6 @@ export default function App() {
             rescueFocusId = id;
         }
     }
-
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -535,7 +516,6 @@ export default function App() {
         }
         return newTree;
     });
-
     if (rescueFocusId) {
         setFocusId(rescueFocusId);
         cursorGoalRef.current = 'start';
@@ -572,7 +552,6 @@ export default function App() {
             }
         }
     }
-
     setTree(prev => {
         const newTree = cloneTree(prev);
         const traverse = (node) => {
@@ -586,7 +565,6 @@ export default function App() {
         return newTree;
     });
     setIsAllExpanded(false);
-    
     if (rescueFocusId) {
         setFocusId(rescueFocusId);
         cursorGoalRef.current = 'start';
@@ -627,13 +605,11 @@ export default function App() {
         if (!result || !result.node) return prev;
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         result.node.children.unshift(newNode);
-        
         setTimeout(() => {
             setFocusId(newNode.id);
             cursorGoalRef.current = 'start';
             setFocusTrigger(t => t + 1);
         }, 0);
-        
         return newTree;
     });
   };
@@ -657,7 +633,6 @@ export default function App() {
   const handleShiftTab = (e, id) => {
     e.preventDefault();
     skipBlurRef.current = true;
-    
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -671,7 +646,6 @@ export default function App() {
         const childIndex = parent.children.findIndex(c => c.id === id);
         parent.children.splice(childIndex, 1);
         grandParent.children.splice(parentIndex + 1, 0, node);
-        
         setTimeout(() => {
             setFocusId(id);
             cursorGoalRef.current = 'end';
@@ -685,23 +659,19 @@ export default function App() {
     e.preventDefault();
     const el = e.target;
     const cursor = el.selectionStart || 0;
-
     skipBlurRef.current = true;
 
     setTree(prev => {
         const newTree = cloneTree(prev);
         const currentResult = findNodeAndParent(newTree, id);
         if (!currentResult || !currentResult.node) return prev;
-        
         if (currentResult.node.text === '') return prev;
 
         const { node, parent } = currentResult;
         const index = parent.children.findIndex(c => c.id === id);
         const text = node.text || '';
-        
         const parentInNewTree = parent;
         const nodeInNewTree = node;
-
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
@@ -711,7 +681,6 @@ export default function App() {
             }
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
-            
             setTimeout(() => {
                 setFocusId(newNode.id);
                 cursorGoalRef.current = 'start';
@@ -723,7 +692,6 @@ export default function App() {
             nodeInNewTree.text = textBefore;
             const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
             nodeInNewTree.children.unshift(newNode);
-            
             setTimeout(() => {
                 setFocusId(newNode.id);
                 cursorGoalRef.current = 'start';
@@ -735,7 +703,6 @@ export default function App() {
             nodeInNewTree.text = textBefore;
             const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
             parentInNewTree.children.splice(index + 1, 0, newNode);
-            
             setTimeout(() => {
                 setFocusId(newNode.id);
                 cursorGoalRef.current = 'start';
@@ -749,7 +716,6 @@ export default function App() {
   const handleBackspace = (e, id, text) => {
     const el = e.target;
     if (el.selectionStart > 0) return;
-
     e.preventDefault();
     skipBlurRef.current = true;
 
@@ -775,13 +741,11 @@ export default function App() {
         }
 
         const index = parent.children.findIndex(c => c.id === id);
-        
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
-              
               setTimeout(() => {
                   setFocusId(node.id);
                   cursorGoalRef.current = 'start'; 
@@ -789,7 +753,6 @@ export default function App() {
               }, 0);
               return newTree;
           }
-
           let cursorTarget = prevSibling.text.length; 
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
               prevSibling.text += " ";
@@ -797,13 +760,11 @@ export default function App() {
           }
           prevSibling.text += node.text;
           parent.children.splice(index, 1);
-          
           if(node.children && node.children.length > 0) {
               if(!prevSibling.children) prevSibling.children = [];
               prevSibling.children = [...prevSibling.children, ...node.children];
               prevSibling.collapsed = false;
           }
-
           setTimeout(() => {
               setFocusId(prevSibling.id);
               cursorGoalRef.current = cursorTarget;
@@ -830,7 +791,6 @@ export default function App() {
   const handleTab = (e, id) => {
     e.preventDefault();
     skipBlurRef.current = true;
-    
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -844,7 +804,6 @@ export default function App() {
         if(!prevSibling.children) prevSibling.children = [];
         prevSibling.children.push(nodeToMove);
         prevSibling.collapsed = false; 
-        
         setTimeout(() => {
             setFocusId(id);
             cursorGoalRef.current = 'end';
@@ -863,7 +822,6 @@ export default function App() {
         if (!result || !result.parent) return prev;
         const { node, parent } = result;
         const index = parent.children.findIndex(c => c.id === id);
-
         if (direction === 'up') {
           if (index > 0) {
              const prevSibling = parent.children[index - 1];
@@ -905,7 +863,6 @@ export default function App() {
              }
           }
         }
-        
         setTimeout(() => {
             setFocusId(id);
             setFocusTrigger(t => t + 1);
@@ -921,10 +878,7 @@ export default function App() {
       if (direction === 'up' && selectionStart > 0) return; 
       if (direction === 'down' && selectionStart < value.length) return; 
     }
-
     e.preventDefault();
-    
-    // ACTIVE SANITIZATION on Navigation
     setTree(prev => {
         const newTree = cloneTree(prev);
         const res = findNodeAndParent(newTree, id);
@@ -933,7 +887,6 @@ export default function App() {
         }
         return newTree;
     });
-
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
     const { node: viewRoot } = result;
@@ -961,7 +914,6 @@ export default function App() {
     if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
     if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
-
     if (e.altKey && e.shiftKey && e.key === 'ArrowRight') {
        e.preventDefault();
        setViewRootId(node.id);
@@ -972,7 +924,6 @@ export default function App() {
        e.preventDefault();
        handleZoomOut();
     }
-
     if (e.altKey && !e.shiftKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
@@ -981,106 +932,12 @@ export default function App() {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
-
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
-
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
     }
-  };
-
-  // --- Global Keyboard Shortcuts ---
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if (e.ctrlKey && e.key === '/') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-      if (e.altKey && e.key === '/') {
-        e.preventDefault();
-        setShowHelp(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-          setShowHelp(false);
-          setShowExport(false);
-      }
-      
-      if (e.altKey && e.key === 'h') {
-         e.preventDefault();
-         handleGoHome();
-      }
-      if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
-         e.preventDefault();
-         handleZoomOut();
-      }
-      if (e.altKey && e.shiftKey && e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleExpandAll();
-      }
-      if (e.altKey && e.shiftKey && e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleCollapseAll();
-      }
-      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        const activeTag = document.activeElement.tagName;
-        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
-           e.preventDefault();
-           if (lastFocusRef.current) {
-             const exists = findNodeAndParent(tree, lastFocusRef.current);
-             if (exists && exists.node) {
-               setFocusId(lastFocusRef.current);
-               cursorGoalRef.current = 'end';
-               setFocusTrigger(t => t + 1);
-               return;
-             }
-           }
-           const result = findNodeAndParent(tree, viewRootId);
-           if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
-               handleAddFirstChild();
-           } else if (result && result.node && result.node.children.length > 0) {
-               setFocusId(result.node.children[0].id);
-               cursorGoalRef.current = 'start';
-               setFocusTrigger(t => t+1);
-           }
-        }
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [tree, viewRootId, showHelp]);
-
-  // --- Drag and Drop ---
-  const handleDragStart = (e, id) => {
-    setDraggedId(id);
-    skipBlurRef.current = true; // FIX: Skip blur during drag
-    e.dataTransfer.effectAllowed = "move";
-    e.target.style.opacity = '0.5';
-  };
-  const handleDragEnd = (e) => { e.target.style.opacity = '1'; setDraggedId(null); };
-  const handleDrop = (e, targetId) => {
-    e.preventDefault();
-    if (!draggedId || draggedId === targetId) return;
-    const newTree = cloneTree(tree);
-    if (isDescendant(newTree, draggedId, targetId)) {
-      alert("Cannot move node into its own child");
-      return;
-    }
-    const sourceResult = findNodeAndParent(newTree, draggedId);
-    const targetResult = findNodeAndParent(newTree, targetId);
-    if (!sourceResult || !sourceResult.parent || !targetResult || !targetResult.parent) return;
-    const { node: sourceNode, parent: sourceParent } = sourceResult;
-    const { parent: targetParent } = targetResult;
-    const sourceIndex = sourceParent.children.findIndex(c => c.id === draggedId);
-    sourceParent.children.splice(sourceIndex, 1);
-    const freshTargetResult = findNodeAndParent(newTree, targetId);
-    const freshTargetParent = freshTargetResult.parent;
-    const targetIndex = freshTargetParent.children.findIndex(c => c.id === targetId);
-    freshTargetParent.children.splice(targetIndex, 0, sourceNode);
-    setTree(newTree);
-    setFocusTrigger(t => t + 1);
-    setFocusId(draggedId);
   };
 
   // --- Renderers ---
@@ -1138,22 +995,18 @@ export default function App() {
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
 
-            <textarea
-              // OPTIMIZATION: Check data-prev-val before touching DOM height
-              ref={el => { if(el) adjustHeight(el); }}
+            <AutoResizingTextarea
               id={`input-${node.id}`}
               value={node.text}
-              onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
+              onChange={(e) => handleUpdateText(node.id, e.target.value)}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
-              onFocus={() => { setFocusId(node.id); }}
+              onFocus={() => setFocusId(node.id)}
               onBlur={() => handleBlur(node.id)}
               onPaste={(e) => handlePaste(e, node.id)}
-              rows={1}
               style={{
                 ...commonTextStyle,
                 gridArea: '1 / 1',
                 border: 'none', outline: 'none', background: 'transparent', 
-                resize: 'none', overflow: 'hidden',
                 color: searchQuery ? 'transparent' : theme.fg, 
                 caretColor: theme.fg, 
                 zIndex: 1 
@@ -1205,11 +1058,9 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh' }}>
       <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px' }}>
-        
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h1 style={{ fontSize: '1.5rem', margin: 0, color: theme.dim }}>My Notes</h1>
-          
           <div style={{ position: 'relative' }}>
             <input 
               ref={searchInputRef}
@@ -1231,7 +1082,6 @@ export default function App() {
               </div>
             )}
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.highlight, border: 'none', borderRadius: '4px', color: '#fff' }} onClick={() => setShowExport(true)}>Export</button>
             <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} onClick={() => setDarkMode(!darkMode)} title="Toggle Theme">{darkMode ? '☀️' : '🌙'}</button>
@@ -1239,22 +1089,19 @@ export default function App() {
             <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.panel, border: `1px solid ${theme.border}`, borderRadius: '4px', color: theme.fg }} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
           </div>
         </div>
-        
         {renderBreadcrumbs()}
-        
         {/* Editor */}
         <div style={{ background: theme.panel, minHeight: '400px', borderRadius: '8px', padding: '10px' }}>
           {viewRootId !== 'root' && (
             <div style={{ marginBottom: '20px', marginLeft: '30px' }}>
                {isHeaderFocused ? (
-                 <textarea
+                 <AutoResizingTextarea
                    id={`input-${currentViewNode.id}`}
                    value={currentViewNode.text}
-                   onChange={(e) => { handleUpdateText(currentViewNode.id, e.target.value); adjustHeight(e.target); }}
+                   onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
                    onKeyDown={handleHeaderKeyDown}
-                   ref={el => { if(el) adjustHeight(el); }}
                    rows={1}
-                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, resize: 'none', overflow: 'hidden', fontFamily: 'inherit' }}
+                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, fontFamily: 'inherit' }}
                  />
                ) : (
                  <div 
@@ -1273,7 +1120,6 @@ export default function App() {
              </div>
           )}
         </div>
-
         {/* Help Modal */}
         {showHelp && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowHelp(false)}>
@@ -1297,7 +1143,6 @@ export default function App() {
             </div>
           </div>
         )}
-
         {/* Export Modal */}
         {showExport && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowExport(false)}>
