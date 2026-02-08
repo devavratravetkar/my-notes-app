@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-15';
+const STORAGE_KEY = 'workflowy-clone-v13-16';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,14 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.15 (Context-Aware Backspace)', collapsed: false, children: [] },
-      { id: '2', text: 'This parent node is expanded.', collapsed: false, children: [
-         { id: '2-1', text: 'Child 1', collapsed: false, children: [] },
-         { id: '2-2', text: 'Child 2', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.16 (Stability Fix)', collapsed: false, children: [] },
+      { id: '2', text: 'Structure:', collapsed: false, children: [
+         { id: '2-1', text: 'Parent (Expanded)', collapsed: false, children: [
+             { id: '2-1-1', text: 'Child A', collapsed: false, children: [] }
+         ]},
+         { id: '2-2', text: 'Node B (Try Backspacing start of this line)', collapsed: false, children: [] }
       ]},
-      { id: '3', text: 'Go to the start of this line and hit Backspace.', collapsed: false, children: [] },
-      { id: '4', text: 'Notice it moves INTO the list above (becoming Child 3), instead of merging with the "Parent" text.', collapsed: false, children: [] }
+      { id: '3', text: 'It should move "Node B" into "Parent" as the last child, cleanly, without duplication.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -67,6 +68,9 @@ export default function App() {
   const searchInputRef = useRef(null);
   const lastFocusRef = useRef(null);
   const cursorGoalRef = useRef(null);
+  
+  // NEW: Ref to prevent Blur logic from clashing with Key logic
+  const skipBlurRef = useRef(false);
 
   // --- Persistence ---
   useEffect(() => {
@@ -325,7 +329,14 @@ export default function App() {
     }
   };
 
+  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
+    // FIX: If we are performing a structural action (nav/delete), skip this cleanup
+    if (skipBlurRef.current) {
+      skipBlurRef.current = false;
+      return;
+    }
+
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (result && result.node) {
@@ -475,6 +486,7 @@ export default function App() {
 
   const handleShiftTab = (e, id) => {
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur for Shift+Tab
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
@@ -495,6 +507,7 @@ export default function App() {
 
   const handleEnter = (e, id) => {
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur for Enter
     const currentResult = findNodeAndParent(tree, id);
     if (!currentResult || !currentResult.node) return;
     if (currentResult.node.text === '') { handleShiftTab(e, id); return; }
@@ -543,18 +556,17 @@ export default function App() {
     }
   };
 
-  // --- CONTEXT-AWARE BACKSPACE (MERGE OR MOVE) ---
   const handleBackspace = (e, id, text) => {
     const el = e.target;
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur for Backspace
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
     const { node, parent } = result;
     
-    // Safety check for children inside current node (standard merge blocker or custom handling)
     if (node.children && node.children.length > 0) {
        const index = parent.children.findIndex(c => c.id === id);
        if (index > 0) {
@@ -574,19 +586,18 @@ export default function App() {
       const prevSibling = parent.children[index - 1];
       
       // HIERARCHY CHECK: Does previous sibling have expanded children?
-      // If yes, MOVE this node to be the LAST child of that sibling.
       if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
-          parent.children.splice(index, 1); // Remove from current position
-          prevSibling.children.push(node); // Add to end of previous sibling's children
+          parent.children.splice(index, 1); 
+          prevSibling.children.push(node); 
           
           setTree(newTree);
           setFocusId(node.id);
-          cursorGoalRef.current = 'start'; // Keep cursor at start
+          cursorGoalRef.current = 'start'; 
           setFocusTrigger(t => t + 1);
           return;
       }
 
-      // STANDARD MERGE (No expanded children above)
+      // STANDARD MERGE
       let cursorTarget = prevSibling.text.length; 
       
       if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
@@ -610,6 +621,7 @@ export default function App() {
 
   const handleTab = (e, id) => {
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
@@ -630,6 +642,7 @@ export default function App() {
 
   const handleMoveNode = (e, id, direction) => {
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
@@ -691,6 +704,7 @@ export default function App() {
     }
 
     e.preventDefault();
+    skipBlurRef.current = true; // FIX: Skip blur for Arrow Nav
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
     const { node: viewRoot } = result;
@@ -808,6 +822,7 @@ export default function App() {
   // --- Drag and Drop ---
   const handleDragStart = (e, id) => {
     setDraggedId(id);
+    skipBlurRef.current = true; // FIX: Skip blur during drag
     e.dataTransfer.effectAllowed = "move";
     e.target.style.opacity = '0.5';
   };
