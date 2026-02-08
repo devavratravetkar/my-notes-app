@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-8';
+const STORAGE_KEY = 'workflowy-clone-v11-9';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.8 (Green Selection & Auto-Exit)', collapsed: false, children: [] },
-      { id: '2', text: 'Search for "Enter" below.', collapsed: false, children: [] },
-      { id: '3', text: 'You will see the selected row turn Green.', collapsed: false, children: [
-         { id: '3-1', text: 'The word "Enter" will stay Yellow (High Contrast).', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.9 (Smart Resume)', collapsed: false, children: [] },
+      { id: '2', text: 'Test 1: Click this node, then click search (or Ctrl+/), then hit Escape.', collapsed: false, children: [
+         { id: '2-1', text: 'Focus should return exactly HERE.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Pressing Enter will clear search and let you type here immediately.', collapsed: false, children: [] }
+      { id: '3', text: 'Test 2: Click this node, then click the blank background outside.', collapsed: false, children: [
+         { id: '3-1', text: 'Now hit Enter. Focus snaps back here instead of making a new node.', collapsed: false, children: [] }
+      ]},
     ]
   },
   viewRootId: 'root',
@@ -60,6 +61,9 @@ export default function App() {
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   const searchInputRef = useRef(null);
+  
+  // NEW: Ref to track the last valid node we were editing
+  const lastFocusRef = useRef(null);
 
   // --- Persistence ---
   useEffect(() => {
@@ -71,23 +75,28 @@ export default function App() {
     }));
   }, [tree, viewRootId, focusId, darkMode]);
 
-  // --- Theme Engine (Green Selection added) ---
+  // --- Track Last Focus ---
+  useEffect(() => {
+    // Whenever focusId changes to a valid node (not null), save it.
+    // We ignore 'root' or viewRootId usually, but saving them is fine too as fallback.
+    if (focusId) {
+      lastFocusRef.current = focusId;
+    }
+  }, [focusId]);
+
+  // --- Theme ---
   const theme = darkMode ? {
     bg: '#1e1e1e', fg: '#e0e0e0', panel: '#2d2d2d', border: '#444', 
     highlight: '#007acc', dim: '#666', inputBg: '#2d2d2d',
-    // Search Colors (Dark)
-    matchRowBg: 'transparent', // Normal matches don't need row bg, just text highlight
-    activeMatchBg: 'rgba(46, 160, 67, 0.25)', // Green-ish background for selection
-    activeMatchBorder: '#2ea043', // Green border
-    textHighlightBg: '#d7ba7d', textHighlightFg: '#000' // Yellow text
+    activeMatchBg: 'rgba(46, 160, 67, 0.25)', 
+    activeMatchBorder: '#2ea043', 
+    textHighlightBg: '#d7ba7d', textHighlightFg: '#000'
   } : {
     bg: '#fff', fg: '#333', panel: '#fff', border: '#eee', 
     highlight: '#007bff', dim: '#ccc', inputBg: '#fff',
-    // Search Colors (Light)
-    matchRowBg: 'transparent',
-    activeMatchBg: 'rgba(230, 255, 230, 1)', // Pale Green background
-    activeMatchBorder: '#28a745', // Green border
-    textHighlightBg: '#fff3cd', textHighlightFg: '#000' // Yellow text
+    activeMatchBg: 'rgba(230, 255, 230, 1)', 
+    activeMatchBorder: '#28a745', 
+    textHighlightBg: '#fff3cd', textHighlightFg: '#000'
   };
 
   // --- Global Styles ---
@@ -149,27 +158,27 @@ export default function App() {
 
   // --- Search Actions ---
   
-  // Exits search mode and optionally jumps to a specific node
   const exitSearch = (targetId = null) => {
     setSearchQuery('');
     setMatchIds([]);
     setCurrentMatchIndex(-1);
     
-    // 1. Blur the search input so it gives up focus
     if (searchInputRef.current) searchInputRef.current.blur();
     
-    // 2. Set focus to the target node (or fallback to view root)
-    const nextFocus = targetId || viewRootId;
-    setFocusId(nextFocus);
+    // Logic:
+    // 1. If targetId is passed (Enter on match), go there.
+    // 2. If not, try to go back to lastFocusRef (where we were before searching).
+    // 3. If neither, fallback to viewRoot.
+    const dest = targetId || lastFocusRef.current || viewRootId;
     
-    // 3. Trigger focus effect
+    setFocusId(dest);
     setFocusTrigger(t => t + 1);
   };
 
   const handleSearchKeyDown = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      exitSearch();
+      exitSearch(); // Will use lastFocusRef
       return;
     }
     if (matchIds.length === 0) return;
@@ -185,9 +194,8 @@ export default function App() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
-        // JUMP AND EXIT
         const targetId = matchIds[currentMatchIndex];
-        exitSearch(targetId);
+        exitSearch(targetId); // Jump to specific match
       }
     }
   };
@@ -250,22 +258,12 @@ export default function App() {
       }
     }
 
-    // Check if tree is fully expanded on load
     const checkAllExpanded = (node) => {
-      // If a node has children and IS collapsed, then tree is not fully expanded
       if (node.children && node.children.length > 0 && node.collapsed) return false;
-      
-      // If node has children, check them recursively
-      if (node.children && node.children.length > 0) {
-        return node.children.every(checkAllExpanded);
-      }
-      
-      return true; // Leaf node or empty children
+      if (node.children && node.children.length > 0) return node.children.every(checkAllExpanded);
+      return true;
     };
-
-    if (checkAllExpanded(cleanTree)) {
-      setIsAllExpanded(true);
-    }
+    if (checkAllExpanded(cleanTree)) setIsAllExpanded(true);
 
     setTree(cleanTree);
     setFocusId(targetId);
@@ -411,7 +409,6 @@ export default function App() {
     }
   };
 
-  // --- Keyboard & Drag Helpers (Compact for readability) ---
   const handleShiftTab = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
@@ -419,9 +416,12 @@ export default function App() {
     if (!result || !result.parent) return;
     const { node, parent } = result;
     if (parent.id === viewRootId) return; 
-    const { parent: grandParent } = findNodeAndParent(newTree, parent.id);
+    const grandParentResult = findNodeAndParent(newTree, parent.id);
+    if (!grandParentResult || !grandParentResult.parent) return;
+    const { parent: grandParent } = grandParentResult;
     const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
-    parent.children.splice(parent.children.findIndex(c => c.id === id), 1);
+    const childIndex = parent.children.findIndex(c => c.id === id);
+    parent.children.splice(childIndex, 1);
     grandParent.children.splice(parentIndex + 1, 0, node);
     setTree(newTree);
     setFocusId(id);
@@ -431,9 +431,14 @@ export default function App() {
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
-    if (currentResult && currentResult.node && currentResult.node.text === '') { handleShiftTab(e, id); return; }
+    if (currentResult && currentResult.node && currentResult.node.text === '') {
+       handleShiftTab(e, id);
+       return;
+    }
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
     parent.children.splice(index + 1, 0, newNode);
@@ -446,15 +451,28 @@ export default function App() {
     e.preventDefault();
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
-    if (result.node.children && result.node.children.length > 0) { result.node.text = "..."; setTree(newTree); return; }
+    if (!result || !result.parent) return;
+    if (result.node.children && result.node.children.length > 0) {
+      result.node.text = "..."; 
+      setTree(newTree);
+      return; 
+    }
     const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
     if (index > 0) {
       let sibling = parent.children[index - 1];
-      while (!sibling.collapsed && sibling.children && sibling.children.length > 0) sibling = sibling.children[sibling.children.length - 1];
+      while (!sibling.collapsed && sibling.children && sibling.children.length > 0) {
+        sibling = sibling.children[sibling.children.length - 1];
+      }
       nextFocusId = sibling.id;
-    } else if (parent.id !== viewRootId) nextFocusId = parent.id;
+    } else {
+      if (parent.id === viewRootId && viewRootId !== 'root') {
+        nextFocusId = viewRootId;
+      } else if (parent.id !== viewRootId) {
+        nextFocusId = parent.id;
+      }
+    }
     parent.children.splice(index, 1);
     setTree(newTree);
     if (nextFocusId) setFocusId(nextFocusId);
@@ -463,33 +481,17 @@ export default function App() {
   const handleTab = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { parent } = findNodeAndParent(newTree, id);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     if (index === 0) return;
-    const prev = parent.children[index - 1];
+    const prevSibling = parent.children[index - 1];
+    const nodeToMove = parent.children[index];
     parent.children.splice(index, 1);
-    if(!prev.children) prev.children = [];
-    prev.children.push(findNodeAndParent(newTree, id).node); // Note: findNode returns new instance from clone
-    // Actually need to move the node object
-    // Re-find node in newTree is tricky if we just spliced it out. 
-    // Better way:
-    const node = parent.children[index]; // wait, we spliced it out. 
-    // Let's redo tab logic cleanly:
-    // ... (Already robust in previous versions, restoring standard block)
-  };
-  
-  // Restore Robust Tab/Move logic block
-  const handleTabReal = (e, id) => {
-    e.preventDefault();
-    const newTree = cloneTree(tree);
-    const { parent, node } = findNodeAndParent(newTree, id);
-    const index = parent.children.findIndex(c => c.id === id);
-    if (index === 0) return;
-    const prev = parent.children[index - 1];
-    parent.children.splice(index, 1);
-    if(!prev.children) prev.children = [];
-    prev.children.push(node);
-    prev.collapsed = false;
+    if(!prevSibling.children) prevSibling.children = [];
+    prevSibling.children.push(nodeToMove);
+    prevSibling.collapsed = false; 
     setTree(newTree);
     setFocusId(id);
     setFocusTrigger(t => t + 1);
@@ -498,37 +500,50 @@ export default function App() {
   const handleMoveNode = (e, id, direction) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
-    const { node, parent } = findNodeAndParent(newTree, id);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    const { node, parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
+
     if (direction === 'up') {
       if (index > 0) {
-         const prev = parent.children[index - 1];
-         if (!prev.collapsed && prev.children.length > 0) {
+         const prevSibling = parent.children[index - 1];
+         if (!prevSibling.collapsed && prevSibling.children && prevSibling.children.length > 0) {
              parent.children.splice(index, 1);
-             prev.children.push(node);
+             prevSibling.children.push(node);
          } else {
-             parent.children[index] = prev;
+             parent.children[index] = prevSibling;
              parent.children[index - 1] = node;
          }
-      } else if (parent.id !== viewRootId && parent.id !== 'root') {
-         const { parent: gp } = findNodeAndParent(newTree, parent.id);
-         parent.children.splice(index, 1);
-         gp.children.splice(gp.children.findIndex(c => c.id === parent.id), 0, node);
-      }
-    } else { // Down
-      if (index < parent.children.length - 1) {
-         const next = parent.children[index + 1];
-         if (!next.collapsed && next.children.length > 0) {
+      } else {
+         if (parent.id === viewRootId || parent.id === 'root') return;
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
              parent.children.splice(index, 1);
-             next.children.unshift(node);
+             grandParent.children.splice(parentIndex, 0, node);
+         }
+      }
+    } else if (direction === 'down') {
+      if (index < parent.children.length - 1) {
+         const nextSibling = parent.children[index + 1];
+         if (!nextSibling.collapsed && nextSibling.children && nextSibling.children.length > 0) {
+             parent.children.splice(index, 1);
+             nextSibling.children.unshift(node);
          } else {
-             parent.children[index] = next;
+             parent.children[index] = nextSibling;
              parent.children[index + 1] = node;
          }
-      } else if (parent.id !== viewRootId && parent.id !== 'root') {
-         const { parent: gp } = findNodeAndParent(newTree, parent.id);
-         parent.children.splice(index, 1);
-         gp.children.splice(gp.children.findIndex(c => c.id === parent.id) + 1, 0, node);
+      } else {
+         if (parent.id === viewRootId || parent.id === 'root') return;
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+             parent.children.splice(index, 1);
+             grandParent.children.splice(parentIndex + 1, 0, node);
+         }
       }
     }
     setTree(newTree);
@@ -536,29 +551,48 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  const handleArrow = (e, id, dir) => {
+  const handleArrow = (e, id, direction) => {
     e.preventDefault();
-    const { node: viewRoot } = findNodeAndParent(tree, viewRootId);
-    const list = getFlatList(viewRoot);
-    const idx = list.findIndex(n => n.id === id);
-    if (dir === 'up') {
-        if (idx > 0) setFocusId(list[idx - 1].id);
-        else if (viewRootId !== 'root') setFocusId(viewRootId);
-    } else if (dir === 'down') {
-        if (idx < list.length - 1) setFocusId(list[idx + 1].id);
+    const result = findNodeAndParent(tree, viewRootId);
+    if(!result) return;
+    const { node: viewRoot } = result;
+    const flatList = getFlatList(viewRoot);
+    const currentIndex = flatList.findIndex(n => n.id === id);
+    if (direction === 'up') {
+      if (currentIndex > 0) {
+        setFocusId(flatList[currentIndex - 1].id);
+      } else if (viewRootId !== 'root') {
+        setFocusId(viewRootId);
+      }
+    } else if (direction === 'down') {
+      if (currentIndex < flatList.length - 1) {
+        setFocusId(flatList[currentIndex + 1].id);
+      }
     }
   };
 
   const handleItemKeyDown = (e, node) => {
     if (e.key === 'Enter') handleEnter(e, node.id);
     if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
-    if (e.key === 'Tab' && !e.shiftKey) handleTabReal(e, node.id);
+    if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
-    if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); setViewRootId(node.id); setFocusId(node.id); }
-    if (e.ctrlKey && e.key === 'ArrowDown') { e.preventDefault(); setCollapseState(node.id, false); }
-    if (e.ctrlKey && e.key === 'ArrowUp') { e.preventDefault(); setCollapseState(node.id, true); }
+
+    if (e.ctrlKey && e.key === 'ArrowRight') {
+       e.preventDefault();
+       setViewRootId(node.id);
+       setFocusId(node.id);
+    }
+    if (e.ctrlKey && e.key === 'ArrowDown') {
+       e.preventDefault();
+       setCollapseState(node.id, false); 
+    }
+    if (e.ctrlKey && e.key === 'ArrowUp') {
+       e.preventDefault();
+       setCollapseState(node.id, true); 
+    }
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
+
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -590,13 +624,29 @@ export default function App() {
         e.preventDefault();
         handleCollapseAll();
       }
+      // Global Enter (Resume editing or add new)
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+           e.preventDefault();
+           // NEW LOGIC: Restore focus to last active node if possible
+           if (lastFocusRef.current) {
+             const exists = findNodeAndParent(tree, lastFocusRef.current);
+             if (exists && exists.node) {
+               setFocusId(lastFocusRef.current);
+               setFocusTrigger(t => t + 1);
+               return;
+             }
+           }
+           
+           // Fallback to old logic (add first child)
            const result = findNodeAndParent(tree, viewRootId);
            if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
-               e.preventDefault();
                handleAddFirstChild();
+           } else if (result && result.node && result.node.children.length > 0) {
+               // Focus first child if exists
+               setFocusId(result.node.children[0].id);
+               setFocusTrigger(t => t+1);
            }
         }
       }
@@ -606,22 +656,34 @@ export default function App() {
   }, [tree, viewRootId, showHelp]);
 
   // --- Drag and Drop ---
-  const handleDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = "move"; e.target.style.opacity = '0.5'; };
+  const handleDragStart = (e, id) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = "move";
+    e.target.style.opacity = '0.5';
+  };
   const handleDragEnd = (e) => { e.target.style.opacity = '1'; setDraggedId(null); };
   const handleDrop = (e, targetId) => {
     e.preventDefault();
     if (!draggedId || draggedId === targetId) return;
     const newTree = cloneTree(tree);
-    // omitted descendant check for brevity in this block, assumed same logic
-    const s = findNodeAndParent(newTree, draggedId);
-    const t = findNodeAndParent(newTree, targetId);
-    if (s && t && s.parent && t.parent) {
-      s.parent.children.splice(s.parent.children.findIndex(c=>c.id===draggedId), 1);
-      t.parent.children.splice(t.parent.children.findIndex(c=>c.id===targetId), 0, s.node);
-      setTree(newTree);
-      setFocusTrigger(tr=>tr+1);
-      setFocusId(draggedId);
+    if (isDescendant(newTree, draggedId, targetId)) {
+      alert("Cannot move node into its own child");
+      return;
     }
+    const sourceResult = findNodeAndParent(newTree, draggedId);
+    const targetResult = findNodeAndParent(newTree, targetId);
+    if (!sourceResult || !sourceResult.parent || !targetResult || !targetResult.parent) return;
+    const { node: sourceNode, parent: sourceParent } = sourceResult;
+    const { parent: targetParent } = targetResult;
+    const sourceIndex = sourceParent.children.findIndex(c => c.id === draggedId);
+    sourceParent.children.splice(sourceIndex, 1);
+    const freshTargetResult = findNodeAndParent(newTree, targetId);
+    const freshTargetParent = freshTargetResult.parent;
+    const targetIndex = freshTargetParent.children.findIndex(c => c.id === targetId);
+    freshTargetParent.children.splice(targetIndex, 0, sourceNode);
+    setTree(newTree);
+    setFocusTrigger(t => t + 1);
+    setFocusId(draggedId);
   };
 
   // --- Renderers ---
@@ -632,7 +694,6 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // Strict Box Model
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', height: '32px', display: 'block', width: '100%', margin: 0
