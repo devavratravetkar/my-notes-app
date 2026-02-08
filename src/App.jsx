@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-20';
+const STORAGE_KEY = 'workflowy-clone-v13-21';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,15 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.20 (Whitespace Sanitizer Restored)', collapsed: false, children: [] },
-      { id: '2', text: 'Test 1: Add bunch of Shift+Enter newlines here.\n\n\n\n', collapsed: false, children: [] },
-      { id: '3', text: 'Test 2: Now press Arrow Down.', collapsed: false, children: [
-         { id: '3-1', text: 'The node above should snap shut (removing excess whitespace) instantly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.21 (Sanitizer Fully Active)', collapsed: false, children: [] },
+      { id: '2', text: 'Test 1: Add shift+enter newlines here.\n\n\n', collapsed: false, children: [] },
+      { id: '3', text: 'Test 2: Arrow Down.', collapsed: false, children: [
+         { id: '3-1', text: 'The node above will now snap shut instantly.', collapsed: false, children: [] }
       ]},
+      { id: '4', text: 'Structure:', collapsed: false, children: [
+         { id: '4-1', text: 'Child 1', collapsed: false, children: [] }
+      ]},
+      { id: '5', text: 'Backspace Merge & Context-Aware moves still work perfectly.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -341,7 +345,6 @@ export default function App() {
 
         if (result && result.node) {
             let text = result.node.text;
-            // SANITIZER: Trim and collapse gaps
             text = text.trim();
             text = text.replace(/\n{3,}/g, '\n\n');
             result.node.text = text;
@@ -355,7 +358,7 @@ export default function App() {
                     result.parent.children.splice(idx, 1);
                 }
             } 
-            // Delete PREVIOUS if empty & childless (Spacer Cleanup)
+            // Delete PREVIOUS if empty & childless
             else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
@@ -518,11 +521,8 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
-    // Only skip blur if moving focus to CHILD/SIBLING.
-    // If inserting ABOVE (Spacer), we stay put, so we allow blur to happen later.
-    if (cursor > 0) {
-        skipBlurRef.current = true;
-    }
+    // ALLOW BLUR ON ENTER (Split) to clean up old node
+    // skipBlurRef.current = true; // REMOVED
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -543,6 +543,7 @@ export default function App() {
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
+            // INSERT SPACER ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
@@ -550,6 +551,7 @@ export default function App() {
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
         } else if (shouldSplitIntoChild) {
+            // SPLIT TO CHILD
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -562,6 +564,7 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
+            // SPLIT TO SIBLING
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -583,7 +586,7 @@ export default function App() {
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
-    skipBlurRef.current = true; // DELETE must skip blur
+    skipBlurRef.current = true; // KEEP SKIP BLUR for deletes
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -593,6 +596,7 @@ export default function App() {
         
         if (node.children && node.children.length > 0) {
            const idx = parent.children.findIndex(c => c.id === id);
+           // Handle Unindent with Children
            if (idx === 0 && parent.id !== viewRootId) {
                const gpResult = findNodeAndParent(newTree, parent.id);
                if(gpResult && gpResult.parent) {
@@ -611,6 +615,7 @@ export default function App() {
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
           
+          // CONTEXT AWARE BACKSPACE (Move In)
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
@@ -623,6 +628,7 @@ export default function App() {
               return newTree;
           }
 
+          // MERGE
           let cursorTarget = prevSibling.text.length; 
           
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
@@ -759,7 +765,8 @@ export default function App() {
     }
 
     e.preventDefault();
-    // NO skipBlurRef here. We WANT blur to clean up whitespace.
+    // WE ALLOW BLUR ON ARROW NAV to trigger cleanup
+    // skipBlurRef.current = true; // REMOVED
     
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
