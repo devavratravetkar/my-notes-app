@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-31';
+const STORAGE_KEY = 'workflowy-clone-v13-32';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.31 (Stability & Performance)', collapsed: false, children: [] },
-      { id: '2', text: 'We fixed the "Collapsing Textarea" bug.', collapsed: false, children: [] },
-      { id: '3', text: 'Try Zooming / Navigating:', collapsed: false, children: [
-         { id: '3-1', text: 'It should remain buttery smooth.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Text should not disappear or shrink unexpectedly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.32 (Stability Restored)', collapsed: false, children: [] },
+      { id: '2', text: 'We reverted the complex component logic to fix navigation.', collapsed: false, children: [] },
+      { id: '3', text: 'We moved the "Auto-Resize" logic to the onChange event only.', collapsed: false, children: [
+         { id: '3-1', text: 'This stops the "Flickering" because the app stops recalculating height 60 times a second.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Zooming is fast again.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'All previous features (Deep Links, Export, Drag/Drop) are active.', collapsed: false, children: [] }
+      { id: '4', text: 'Arrow Key Navigation is fixed.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -83,41 +83,12 @@ const treeToString = (node, depth = 0) => {
   return output;
 };
 
-// --- OPTIMIZED COMPONENT: AutoResizingTextarea ---
-const AutoResizingTextarea = ({ value, style, ...props }) => {
-  const textareaRef = useRef(null);
-
-  // 1. Resize on value change (Typing)
-  useLayoutEffect(() => {
-    if (textareaRef.current) {
-      // Reset to auto temporarily to get correct scrollHeight for shrinking
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
-    }
-  }, [value]);
-
-  return (
-    <textarea
-      ref={textareaRef}
-      value={value}
-      style={{
-        ...style,
-        // FIX: Removed height: 'auto' from here to prevent collapse on parent re-renders
-        resize: 'none',
-        overflow: 'hidden',
-        display: 'block' // Ensure block layout
-      }}
-      {...props}
-    />
-  );
-};
-
 export default function App() {
   // --- State ---
   const [state, setState] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return DEFAULT_STATE;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return DEFAULT_STATE;
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
@@ -128,7 +99,7 @@ export default function App() {
     }
   });
 
-  const [tree, setTree] = useState(state.tree || DEFAULT_STATE.tree);
+  const [tree, setTree] = useState(state.tree);
   
   // -- DEEP LINKING --
   const [viewRootId, setViewRootId] = useState(() => {
@@ -166,7 +137,7 @@ export default function App() {
     }));
   }, [tree, viewRootId, focusId, darkMode]);
 
-  // --- Deep Linking ---
+  // --- Deep Linking Sync ---
   useEffect(() => {
     if (viewRootId) window.location.hash = viewRootId;
   }, [viewRootId]);
@@ -238,6 +209,13 @@ export default function App() {
         }
     }
     return null;
+  };
+
+  // --- Simple Adjust Height (No Thrashing) ---
+  const adjustHeight = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
   };
 
   // --- Search Logic ---
@@ -314,10 +292,9 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
-             // Force one resize on focus to be safe
-             el.style.height = 'auto';
-             el.style.height = el.scrollHeight + 'px';
-
+             // Only force layout update on focus switch, not every render
+             adjustHeight(el);
+             
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -334,7 +311,10 @@ export default function App() {
            }
         } else {
            const headerEl = document.getElementById(`input-${viewRootId}`);
-           if (headerEl) headerEl.focus();
+           if (headerEl) {
+             headerEl.focus();
+             if(headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
+           }
         }
       }, 0);
     }
@@ -406,6 +386,19 @@ export default function App() {
         )}
       </span>
     );
+  };
+
+  // --- Handlers ---
+  const getFlatList = (rootNode) => {
+    const list = [];
+    const traverse = (node) => {
+      if (node.id !== rootNode.id) list.push(node);
+      if (!node.collapsed && node.children) {
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(rootNode);
+    return list;
   };
 
   const handleUpdateText = (id, newText) => {
@@ -1068,6 +1061,7 @@ export default function App() {
                onDrop={(e) => handleDrop(e, node.id)}
              >•</span>
           </div>
+          
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
             <div style={{
                ...commonTextStyle,
@@ -1078,18 +1072,26 @@ export default function App() {
             }}>
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
-            <AutoResizingTextarea
+
+            <textarea
+              // REVERTED TO SIMPLE TEXTAREA + ONCHANGE RESIZE
+              ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
-              onChange={(e) => handleUpdateText(node.id, e.target.value)}
+              onChange={(e) => { 
+                  handleUpdateText(node.id, e.target.value); 
+                  adjustHeight(e.target); // RESIZE ONLY ON TYPING
+              }}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
-              onFocus={() => setFocusId(node.id)}
+              onFocus={() => { setFocusId(node.id); }}
               onBlur={() => handleBlur(node.id)}
               onPaste={(e) => handlePaste(e, node.id)}
+              rows={1}
               style={{
                 ...commonTextStyle,
                 gridArea: '1 / 1',
                 border: 'none', outline: 'none', background: 'transparent', 
+                resize: 'none', overflow: 'hidden',
                 color: searchQuery ? 'transparent' : theme.fg, 
                 caretColor: theme.fg, 
                 zIndex: 1 
@@ -1178,13 +1180,14 @@ export default function App() {
           {viewRootId !== 'root' && (
             <div style={{ marginBottom: '20px', marginLeft: '30px' }}>
                {isHeaderFocused ? (
-                 <AutoResizingTextarea
+                 <textarea
                    id={`input-${currentViewNode.id}`}
                    value={currentViewNode.text}
-                   onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
+                   onChange={(e) => { handleUpdateText(currentViewNode.id, e.target.value); adjustHeight(e.target); }}
                    onKeyDown={handleHeaderKeyDown}
+                   ref={el => { if(el) adjustHeight(el); }}
                    rows={1}
-                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, fontFamily: 'inherit' }}
+                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, resize: 'none', overflow: 'hidden', fontFamily: 'inherit' }}
                  />
                ) : (
                  <div 
