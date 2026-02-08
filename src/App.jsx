@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v10';
+const STORAGE_KEY = 'workflowy-clone-v10-1';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'New: Global Expand/Collapse!', collapsed: false, children: [] },
-      { id: '2', text: 'Try the buttons top-right or shortcuts:', collapsed: false, children: [
-         { id: '2-1', text: 'Ctrl + Shift + Up to Collapse All', collapsed: false, children: [] },
-         { id: '2-2', text: 'Ctrl + Shift + Down to Expand All', collapsed: false, children: [
-            { id: '2-2-1', text: 'Even deeply nested items like this.', collapsed: false, children: [] }
-         ]}
+      { id: '1', text: 'Fixed: Shortcuts no longer conflict!', collapsed: false, children: [] },
+      { id: '2', text: 'Top Right: Single "Expand/Collapse" toggle button.', collapsed: false, children: [] },
+      { id: '3', text: 'Try Ctrl+Shift+Up/Down (Clean expand/collapse without moving items).', collapsed: false, children: [
+         { id: '3-1', text: 'Hidden item 1', collapsed: false, children: [] },
+         { id: '3-2', text: 'Hidden item 2', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -46,6 +45,9 @@ export default function App() {
   const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  
+  // Toggle State for the Header Button
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   // --- Persistence ---
   useEffect(() => {
@@ -200,7 +202,6 @@ export default function App() {
   // --- GLOBAL EXPAND / COLLAPSE ---
   const handleExpandAll = () => {
     const newTree = cloneTree(tree);
-    // Recursive expand
     const traverse = (node) => {
       if (node.children) {
         node.collapsed = false;
@@ -209,11 +210,11 @@ export default function App() {
     };
     traverse(newTree);
     setTree(newTree);
+    setIsAllExpanded(true); // Sync state
   };
 
   const handleCollapseAll = () => {
     const newTree = cloneTree(tree);
-    // Recursive collapse
     const traverse = (node) => {
       if (node.children) {
         node.collapsed = true;
@@ -221,9 +222,17 @@ export default function App() {
       }
     };
     traverse(newTree);
-    // Ensure root remains expanded so we can see top level items
-    newTree.collapsed = false; 
+    newTree.collapsed = false; // Root always expanded
     setTree(newTree);
+    setIsAllExpanded(false); // Sync state
+  };
+
+  const toggleGlobalState = () => {
+    if (isAllExpanded) {
+      handleCollapseAll();
+    } else {
+      handleExpandAll();
+    }
   };
 
   const handleZoomOut = () => {
@@ -483,8 +492,11 @@ export default function App() {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
-    if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
-    if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
+    
+    // FIX: Ensure Ctrl is NOT pressed when triggering Shift+Up/Down (Move Node)
+    // This prevents conflict with Global Expand/Collapse (Ctrl+Shift+Down)
+    if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
+    if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
@@ -653,7 +665,7 @@ export default function App() {
           <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
           <div style={styles.shortcutItem}><span>Ctrl + Right / Left</span> <span>Zoom In / Out</span></div>
           <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
-          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node (Fluid)</span></div>
+          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
           <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
           <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
         </div>
@@ -670,10 +682,10 @@ export default function App() {
       <div style={styles.headerRow}>
         <h1 style={styles.header}>My Notes</h1>
         <div style={styles.headerControls}>
-          <button style={styles.linkBtn} onClick={handleExpandAll}>Expand All</button>
-          <span style={styles.separator}>|</span>
-          <button style={styles.linkBtn} onClick={handleCollapseAll}>Collapse All</button>
-          <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help</button>
+          <button style={styles.linkBtn} onClick={toggleGlobalState}>
+            {isAllExpanded ? 'Collapse All' : 'Expand All'}
+          </button>
+          <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
         </div>
       </div>
       
@@ -712,9 +724,8 @@ const styles = {
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
   headerControls: { display: 'flex', alignItems: 'center', gap: '8px' },
   header: { fontSize: '1.5rem', margin: 0, color: '#888' },
-  linkBtn: { background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' },
-  separator: { color: '#ccc' },
-  helpBtn: { padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px', marginLeft: '10px' },
+  linkBtn: { background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline', marginRight: '10px' },
+  helpBtn: { padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px' },
   breadcrumbs: { marginBottom: '20px', fontSize: '14px', color: '#666' },
   breadcrumbLink: { cursor: 'pointer', textDecoration: 'underline', color: '#007bff' },
   editor: { background: '#fff', minHeight: '400px' },
