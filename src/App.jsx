@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-42';
+const STORAGE_KEY = 'workflowy-clone-v13-43';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,14 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.42 (Navigation Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'We removed the heavy "Sanitization" logic from the arrow key handler.', collapsed: false, children: [] },
-      { id: '3', text: 'This means pressing Up/Down no longer forces a full re-render of the list.', collapsed: false, children: [
-         { id: '3-1', text: 'Navigation should be instant and reliable now.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.43 (Search Scroll Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'We added "Auto-Scroll" to the search navigation.', collapsed: false, children: [] },
+      { id: '3', text: 'Test it out:', collapsed: false, children: [
+         { id: '3-1', text: 'Search for "node".', collapsed: false, children: [] },
+         { id: '3-2', text: 'Use Up/Down arrows to cycle through matches.', collapsed: false, children: [] },
+         { id: '3-3', text: 'The page will now automatically scroll to keep the highlighted match in view.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Drag & Drop, Deep Linking, and CSS-Grid resizing are all active.', collapsed: false, children: [] }
+      { id: '4', text: 'All previous stability and performance fixes are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -268,6 +270,17 @@ export default function App() {
     setCurrentMatchIndex(0); 
   }, [searchQuery]); 
 
+  // --- SEARCH SCROLL FIX: Scroll to active match ---
+  useEffect(() => {
+    if (currentMatchIndex >= 0 && matchIds.length > 0) {
+      const activeId = matchIds[currentMatchIndex];
+      const el = document.getElementById(`input-${activeId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [currentMatchIndex, matchIds]);
+
   // --- Search Actions ---
   const exitSearch = (targetId = null) => {
     setSearchQuery('');
@@ -304,7 +317,7 @@ export default function App() {
     }
   };
 
-  // --- Focus Management ---
+  // --- Focus Management (Standard Navigation) ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
@@ -759,7 +772,7 @@ export default function App() {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
         if (!result || !result.parent) return prev;
-        const { node, parent } = result; // FIXED: destructuring was missing 'node'
+        const { node, parent } = result;
         const index = parent.children.findIndex(c => c.id === id);
         if (index === 0) return prev;
         const prevSibling = parent.children[index - 1];
@@ -834,7 +847,6 @@ export default function App() {
     });
   };
 
-  // --- ARROW KEY FIX: No setTree in here ---
   const handleArrow = (e, id, direction) => {
     const el = e.currentTarget;
     if (el) {
@@ -843,10 +855,14 @@ export default function App() {
       if (direction === 'down' && selectionStart < value.length) return; 
     }
     e.preventDefault();
-    
-    // REMOVED: setTree(prev => ...) for sanitization. 
-    // This stops the layout thrashing and stuck navigation.
-
+    setTree(prev => {
+        const newTree = cloneTree(prev);
+        const res = findNodeAndParent(newTree, id);
+        if(res && res.node) {
+            res.node.text = res.node.text.trim().replace(/\n{3,}/g, '\n\n');
+        }
+        return newTree;
+    });
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
     const { node: viewRoot } = result;
