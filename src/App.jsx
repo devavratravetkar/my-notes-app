@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-5';
+const STORAGE_KEY = 'workflowy-clone-v12-6';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.5 (Smart Truncation)', collapsed: false, children: [] },
-      { id: '2', text: 'Breadcrumbs are now tidy.', collapsed: false, children: [] },
-      { id: '3', text: 'This is a very long node title that serves as an example to demonstrate how the header truncation works when you zoom into it. Click the bullet to zoom in!', collapsed: false, children: [
-         { id: '3-1', text: 'Notice the header above is truncated.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Click the header to reveal the full text for editing.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.6 (Smart Cursor Navigation)', collapsed: false, children: [] },
+      { id: '2', text: 'Arrow Up/Down now behaves intelligently:', collapsed: false, children: [
+         { id: '2-1', text: 'If you are in the middle of text, arrows move the cursor.', collapsed: false, children: [] },
+         { id: '2-2', text: 'If you are at the start/end, arrows jump to the next node.', collapsed: false, children: [] }
       ]},
+      { id: '3', text: 'Try it! Click here and press Up/Down.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -205,8 +205,8 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
-             const len = el.value.length; 
-             el.setSelectionRange(len, len);
+             // We do NOT force cursor position here to allow native up/down landing
+             // unless it's a fresh focus event (handled by user click or enter)
              adjustHeight(el);
            }
            const rect = el.getBoundingClientRect();
@@ -214,7 +214,6 @@ export default function App() {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         } else {
-           // If focusing header or fallback
            const headerEl = document.getElementById(`input-${viewRootId}`);
            if (headerEl) {
              headerEl.focus();
@@ -292,6 +291,29 @@ export default function App() {
   };
 
   // --- Handlers ---
+  const isDescendant = (tree, sourceId, targetId) => {
+    const sourceResult = findNodeAndParent(tree, sourceId);
+    if (!sourceResult) return false;
+    const { node: sourceNode } = sourceResult;
+    const findInSubtree = (n) => {
+      if (n.id === targetId) return true;
+      return n.children && n.children.some(findInSubtree);
+    };
+    return sourceNode.children && sourceNode.children.some(findInSubtree);
+  };
+
+  const getFlatList = (rootNode) => {
+    const list = [];
+    const traverse = (node) => {
+      if (node.id !== rootNode.id) list.push(node);
+      if (!node.collapsed && node.children) {
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(rootNode);
+    return list;
+  };
+
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -556,6 +578,14 @@ export default function App() {
   };
 
   const handleArrow = (e, id, direction) => {
+    // SMART NAVIGATION: Only navigate if at text boundary
+    const el = e.target;
+    if (el) {
+      const { selectionStart, value } = el;
+      if (direction === 'up' && selectionStart > 0) return; // Allow cursor to move up in text
+      if (direction === 'down' && selectionStart < value.length) return; // Allow cursor to move down in text
+    }
+
     e.preventDefault();
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
@@ -604,6 +634,7 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
+    // Standard Arrow Navigation with Smart Boundary Check
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -788,7 +819,7 @@ export default function App() {
              <span 
                style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
                onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
-               title={node.text} // Show full text on hover
+               title={node.text}
              >
                {truncate(node.text, 30) || 'Home'}
              </span>
