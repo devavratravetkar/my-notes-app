@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-10';
+const STORAGE_KEY = 'workflowy-clone-v13-11';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.10 (Rapid Merge)', collapsed: false, children: [] },
-      { id: '2', text: 'Node A', collapsed: false, children: [] },
-      { id: '3', text: 'Node B', collapsed: false, children: [] },
-      { id: '4', text: 'Node C (Try Backspacing from the start of this node)', collapsed: false, children: [] },
-      { id: '5', text: 'It will merge up, and the cursor will land at the START of the line, allowing you to hit Backspace again to keep merging.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.11 (Auto-Resize Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Paste a long paragraph here and hit Enter in the middle.', collapsed: false, children: [] },
+      { id: '3', text: 'The text moves down, and the original node instantly shrinks. No more ghost space!', collapsed: false, children: [
+         { id: '3-1', text: 'Empty node stacking protection is active.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Rapid Backspace Merging is active.', collapsed: false, children: [] }
+      ]},
     ]
   },
   viewRootId: 'root',
@@ -487,6 +488,7 @@ export default function App() {
     const nodeInNewTree = resultInNewTree.node;
 
     if (cursor === 0) {
+        // Prevent stacking empty nodes above
         if (index > 0) {
             const prevNode = parentInNewTree.children[index - 1];
             if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return;
@@ -540,8 +542,7 @@ export default function App() {
       
       setTree(newTree);
       setFocusId(prevSibling.id);
-      // FIXED: Cursor goes to start of merged node to allow continuous backspacing
-      cursorGoalRef.current = 0; 
+      cursorGoalRef.current = 0; // Rapid Merge Cursor
       setFocusTrigger(t => t + 1);
     } else {
       if (parent.id !== viewRootId) {
@@ -830,7 +831,7 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el && isEditing) adjustHeight(el); }}
+              ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
@@ -979,7 +980,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge)</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
               </div>
             </div>
           </div>
