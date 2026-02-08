@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-22';
+const STORAGE_KEY = 'workflowy-clone-v13-23';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.22 (Active Sanitization)', collapsed: false, children: [] },
-      { id: '2', text: 'Test: Add Shift+Enter newlines here.\n\n\n', collapsed: false, children: [] },
-      { id: '3', text: 'Now press Arrow Down.', collapsed: false, children: [
-         { id: '3-1', text: 'It snaps shut INSTANTLY because the Arrow Key handler now actively sanitizes the node you are leaving.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.23 (Visual Snap Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Test 1: Add Shift+Enter newlines here.\n\n\n', collapsed: false, children: [] },
+      { id: '3', text: 'Test 2: Arrow Down.', collapsed: false, children: [
+         { id: '3-1', text: 'The node above snaps shut VISUALLY instantly.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'All other features (Move, Merge, Context-Awareness) are preserved.', collapsed: false, children: [] }
+      { id: '4', text: 'We enabled auto-height for ALL nodes (not just focused ones) to catch these background updates.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -234,7 +234,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization ---
+  // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -327,6 +327,7 @@ export default function App() {
     });
   };
 
+  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
@@ -341,18 +342,22 @@ export default function App() {
 
         if (result && result.node) {
             let text = result.node.text;
+            // Trim whitespace
             text = text.trim();
             text = text.replace(/\n{3,}/g, '\n\n');
             result.node.text = text;
 
             const hasChildren = result.node.children && result.node.children.length > 0;
             
+            // Delete CURRENT if empty & childless
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx !== -1) {
                     result.parent.children.splice(idx, 1);
                 }
-            } else if (result.parent) {
+            } 
+            // Delete PREVIOUS if empty & childless (Spacer Cleanup)
+            else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
                     const prevNode = result.parent.children[idx - 1];
@@ -577,7 +582,7 @@ export default function App() {
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
-    skipBlurRef.current = true;
+    skipBlurRef.current = true; // KEEP SKIP BLUR for deletes
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -754,11 +759,12 @@ export default function App() {
 
     e.preventDefault();
     
-    // NEW: Active Sanitization on Arrow
+    // ACTIVE SANITIZATION: Update state immediately on navigation
     setTree(prev => {
         const newTree = cloneTree(prev);
         const res = findNodeAndParent(newTree, id);
         if(res && res.node) {
+            // Trim whitespace actively
             res.node.text = res.node.text.trim().replace(/\n{3,}/g, '\n\n');
         }
         return newTree;
@@ -966,7 +972,8 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el && isEditing) adjustHeight(el); }}
+              // FIX: Auto-adjust height ALWAYS (even if not focused) to snap shut on remote updates
+              ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
