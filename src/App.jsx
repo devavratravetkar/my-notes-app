@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-7';
+const STORAGE_KEY = 'workflowy-clone-v13-8';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,10 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.7 (Self-Cleaning Lists)', collapsed: false, children: [] },
-      { id: '2', text: 'Try hitting Enter multiple times at the bottom.', collapsed: false, children: [] },
-      { id: '3', text: 'Notice that it does NOT leave a trail of empty bullets behind. As you leave an empty node, it cleans itself up.', collapsed: false, children: [
-         { id: '3-1', text: 'However, Enter at the start of a line (to push text down) still works perfectly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.8 (Backspace Merge)', collapsed: false, children: [] },
+      { id: '2', text: 'Go to the start of this line and hit Backspace.', collapsed: false, children: [] },
+      { id: '3', text: 'It will merge into the node above seamlessly.', collapsed: false, children: [
+         { id: '3-1', text: 'If you hit Enter at the start (creating a gap)...', collapsed: false, children: [] },
+         { id: '3-2', text: '...you can now hit Backspace to close that gap instantly.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -64,6 +65,8 @@ export default function App() {
 
   const searchInputRef = useRef(null);
   const lastFocusRef = useRef(null);
+  
+  // Ref modified to accept 'start', 'end', OR a specific number index
   const cursorGoalRef = useRef(null);
 
   // --- Persistence ---
@@ -207,9 +210,14 @@ export default function App() {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
              adjustHeight(el);
-             if (cursorGoalRef.current === 'start') {
+             // Handle numeric cursor goals (for merges)
+             if (typeof cursorGoalRef.current === 'number') {
+                el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
+             } 
+             else if (cursorGoalRef.current === 'start') {
                el.setSelectionRange(0, 0);
-             } else if (cursorGoalRef.current === 'end') {
+             } 
+             else if (cursorGoalRef.current === 'end') {
                const len = el.value.length;
                el.setSelectionRange(len, len);
              }
@@ -230,7 +238,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization ---
+  // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -321,7 +329,6 @@ export default function App() {
     }
   };
 
-  // --- CLEANUP ON BLUR ---
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -332,18 +339,13 @@ export default function App() {
       result.node.text = text;
 
       const hasChildren = result.node.children && result.node.children.length > 0;
-      
-      // AUTO-DELETE: If empty and no children, delete node.
+      // Auto-delete empty nodes without children
       if (text === '' && !hasChildren && result.parent) {
-         // Do not delete if it is the only node in the entire view? 
-         // Optional, but usually good to keep at least one node.
-         // For now, let's allow deleting, the app handles empty state well.
          const idx = result.parent.children.findIndex(c => c.id === id);
          if (idx !== -1) {
              result.parent.children.splice(idx, 1);
          }
       }
-      
       setTree(newTree);
     }
   };
@@ -474,17 +476,11 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  // --- SMART SPLIT & INSERT ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
     if (!currentResult || !currentResult.node) return;
-    
-    // Empty Node -> Shift+Tab
-    if (currentResult.node.text === '') {
-       handleShiftTab(e, id);
-       return;
-    }
+    if (currentResult.node.text === '') { handleShiftTab(e, id); return; }
 
     const { node, parent } = currentResult;
     const index = parent.children.findIndex(c => c.id === id);
@@ -498,25 +494,18 @@ export default function App() {
     const nodeInNewTree = resultInNewTree.node;
 
     if (cursor === 0) {
-        // ENTER AT START: Insert Empty Node ABOVE
-        // We do this to avoid the empty node blurring and deleting itself immediately.
-        // By inserting before, we keep focus on the CURRENT node (with text), 
-        // so the new empty node above is passive and won't trigger delete-on-blur until visited.
+        // Enter at start: Insert Empty Node ABOVE, keep focus here
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         parentInNewTree.children.splice(index, 0, newNode);
-        
-        // Keep focus on current node, but update tree
         setTree(newTree);
-        // cursor remains 0, text remains same
+        // Focus stays on current node, no cursor move needed
     } else {
-        // ENTER MIDDLE/END: Split and Move Focus Down
+        // Enter middle/end: Split
         const textBefore = text.slice(0, cursor);
         const textAfter = text.slice(cursor);
-
         nodeInNewTree.text = textBefore;
         const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
         parentInNewTree.children.splice(index + 1, 0, newNode);
-
         setTree(newTree);
         setFocusId(newNode.id);
         cursorGoalRef.current = 'start';
@@ -524,41 +513,47 @@ export default function App() {
     }
   };
 
+  // --- SMART BACKSPACE (MERGE) ---
   const handleBackspace = (e, id, text) => {
-    if (text !== '') return;
+    const el = e.target;
+    // Allow deleting characters normally if NOT at the start
+    if (el.selectionStart > 0) return;
+
+    // If at start, we merge or unindent
     e.preventDefault();
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
-    
-    if (result.node.children && result.node.children.length > 0) {
-      result.node.text = "..."; 
-      setTree(newTree);
-      return; 
-    }
-
-    const { parent } = result;
+    const { node, parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
-    let nextFocusId = null;
+
     if (index > 0) {
-      let sibling = parent.children[index - 1];
-      while (!sibling.collapsed && sibling.children && sibling.children.length > 0) {
-        sibling = sibling.children[sibling.children.length - 1];
+      // Merge with previous sibling
+      const prevSibling = parent.children[index - 1];
+      const prevLength = prevSibling.text.length; // Save length to place cursor later
+      
+      // 1. Join Text
+      prevSibling.text += node.text;
+      
+      // 2. Adopt Children
+      if (node.children && node.children.length > 0) {
+         if (!prevSibling.children) prevSibling.children = [];
+         prevSibling.children = [...prevSibling.children, ...node.children];
+         prevSibling.collapsed = false; // Expand to show adopted kids
       }
-      nextFocusId = sibling.id;
+      
+      // 3. Delete current node
+      parent.children.splice(index, 1);
+      
+      setTree(newTree);
+      setFocusId(prevSibling.id);
+      cursorGoalRef.current = prevLength; // Set cursor exactly at the join point
+      setFocusTrigger(t => t + 1);
     } else {
-      if (parent.id === viewRootId && viewRootId !== 'root') {
-        nextFocusId = viewRootId;
-      } else if (parent.id !== viewRootId) {
-        nextFocusId = parent.id;
+      // No previous sibling -> Unindent (Shift+Tab logic)
+      if (parent.id !== viewRootId) {
+         handleShiftTab(e, id);
       }
-    }
-    parent.children.splice(index, 1);
-    setTree(newTree);
-    if (nextFocusId) {
-        setFocusId(nextFocusId);
-        cursorGoalRef.current = 'end';
-        setFocusTrigger(t => t + 1);
     }
   };
 
@@ -991,7 +986,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge)</span></div>
               </div>
             </div>
           </div>
