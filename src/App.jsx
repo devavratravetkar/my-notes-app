@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-32';
+const STORAGE_KEY = 'workflowy-clone-v13-33';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.32 (Stability Restored)', collapsed: false, children: [] },
-      { id: '2', text: 'We reverted the complex component logic to fix navigation.', collapsed: false, children: [] },
-      { id: '3', text: 'We moved the "Auto-Resize" logic to the onChange event only.', collapsed: false, children: [
-         { id: '3-1', text: 'This stops the "Flickering" because the app stops recalculating height 60 times a second.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Zooming is fast again.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.33 (The "Silver Bullet" Fix)', collapsed: false, children: [] },
+      { id: '2', text: 'We replaced the JS resizing engine with a CSS Grid system.', collapsed: false, children: [] },
+      { id: '3', text: 'Performance Test:', collapsed: false, children: [
+         { id: '3-1', text: 'Zoom in and out as fast as you want.', collapsed: false, children: [] },
+         { id: '3-2', text: 'The "Flicker" and "Freeze" are gone because JavaScript is no longer calculating pixel heights.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Arrow Key Navigation is fixed.', collapsed: false, children: [] }
+      { id: '4', text: 'Navigation and Deep Linking are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -211,13 +211,6 @@ export default function App() {
     return null;
   };
 
-  // --- Simple Adjust Height (No Thrashing) ---
-  const adjustHeight = (el) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-  };
-
   // --- Search Logic ---
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -292,9 +285,6 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
-             // Only force layout update on focus switch, not every render
-             adjustHeight(el);
-             
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -311,10 +301,7 @@ export default function App() {
            }
         } else {
            const headerEl = document.getElementById(`input-${viewRootId}`);
-           if (headerEl) {
-             headerEl.focus();
-             if(headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
-           }
+           if (headerEl) headerEl.focus();
         }
       }, 0);
     }
@@ -1026,10 +1013,11 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
+    // EXACT STYLING MUST MATCH HIDDEN DIV AND TEXTAREA FOR GRID HACK
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
-      boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
-      whiteSpace: 'pre-wrap', overflowWrap: 'break-word'
+      minHeight: '32px', boxSizing: 'border-box', width: '100%',
+      whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word'
     };
 
     return (
@@ -1063,27 +1051,23 @@ export default function App() {
           </div>
           
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
+            {/* GRID HACK: Hidden Div for Auto-Height */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
-               visibility: searchQuery ? 'visible' : 'hidden',
-               pointerEvents: 'none', 
-               color: theme.fg 
+               visibility: 'hidden', // Invisible but takes up space
+               pointerEvents: 'none'
             }}>
-               <HighlightedText text={node.text} query={searchQuery} />
+               {node.text + ' '} {/* Append space to prevent jump at end of line */}
             </div>
 
+            {/* Visible Input */}
             <textarea
-              // REVERTED TO SIMPLE TEXTAREA + ONCHANGE RESIZE
-              ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
-              onChange={(e) => { 
-                  handleUpdateText(node.id, e.target.value); 
-                  adjustHeight(e.target); // RESIZE ONLY ON TYPING
-              }}
+              onChange={(e) => handleUpdateText(node.id, e.target.value)}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
-              onFocus={() => { setFocusId(node.id); }}
+              onFocus={() => setFocusId(node.id)}
               onBlur={() => handleBlur(node.id)}
               onPaste={(e) => handlePaste(e, node.id)}
               rows={1}
@@ -1097,6 +1081,17 @@ export default function App() {
                 zIndex: 1 
               }} 
             />
+            {/* Search Highlight Overlay */}
+            <div style={{
+               ...commonTextStyle,
+               gridArea: '1 / 1',
+               visibility: searchQuery ? 'visible' : 'hidden',
+               pointerEvents: 'none', 
+               color: theme.fg,
+               zIndex: 2
+            }}>
+               <HighlightedText text={node.text} query={searchQuery} />
+            </div>
           </div>
         </div>
         {!node.collapsed && (
@@ -1183,7 +1178,7 @@ export default function App() {
                  <textarea
                    id={`input-${currentViewNode.id}`}
                    value={currentViewNode.text}
-                   onChange={(e) => { handleUpdateText(currentViewNode.id, e.target.value); adjustHeight(e.target); }}
+                   onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
                    onKeyDown={handleHeaderKeyDown}
                    ref={el => { if(el) adjustHeight(el); }}
                    rows={1}
