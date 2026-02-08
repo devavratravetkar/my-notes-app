@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-2';
+const STORAGE_KEY = 'workflowy-clone-v11-5';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.2 (Enhanced Search)', collapsed: false, children: [] },
-      { id: '2', text: 'Search is now easier to exit.', collapsed: false, children: [] },
-      { id: '3', text: 'Try searching "Item":', collapsed: false, children: [
-         { id: '3-1', text: 'Item 1', collapsed: false, children: [] },
-         { id: '3-2', text: 'Item 2', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.5 (Edge-to-Edge)', collapsed: false, children: [] },
+      { id: '2', text: 'The white border is gone. Dark mode covers the whole screen.', collapsed: false, children: [] },
+      { id: '3', text: 'Search highlights are now consistent:', collapsed: false, children: [
+         { id: '3-1', text: 'apple (I am opaque)', collapsed: false, children: [] },
+         { id: '3-2', text: 'banana (I am dimmed)', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Use Up/Down in search to pick one, hit Enter to edit it.', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -26,8 +25,13 @@ const DEFAULT_STATE = {
 
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
+// Helper to escape regex characters for safe highlighting
+const escapeRegExp = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 export default function App() {
-  // --- State Initialization ---
+  // --- State ---
   const [state, setState] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return DEFAULT_STATE;
@@ -47,11 +51,12 @@ export default function App() {
   const [focusId, setFocusId] = useState(state.focusId);
   const [darkMode, setDarkMode] = useState(state.darkMode || false);
   
-  // Search State
+  // Search
   const [searchQuery, setSearchQuery] = useState('');
   const [matchIds, setMatchIds] = useState([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
 
+  // UX
   const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -73,12 +78,30 @@ export default function App() {
   const theme = darkMode ? {
     bg: '#1e1e1e', fg: '#e0e0e0', panel: '#2d2d2d', border: '#444', 
     highlight: '#007acc', dim: '#666', inputBg: '#2d2d2d',
-    matchBg: '#d7ba7d', matchFg: '#000'
+    activeMatchBg: 'rgba(215, 186, 125, 0.25)', 
+    activeMatchBorder: '#d7ba7d',
+    textHighlightBg: '#d7ba7d', textHighlightFg: '#000'
   } : {
     bg: '#fff', fg: '#333', panel: '#fff', border: '#eee', 
     highlight: '#007bff', dim: '#ccc', inputBg: '#fff',
-    matchBg: '#fff3cd', matchFg: '#000'
+    activeMatchBg: 'rgba(255, 243, 205, 0.7)', 
+    activeMatchBorder: '#ffc107',
+    textHighlightBg: '#fff3cd', textHighlightFg: '#000'
   };
+
+  // --- GLOBAL STYLE INJECTOR (Fixes White Border) ---
+  useEffect(() => {
+    document.body.style.margin = '0';
+    document.body.style.padding = '0';
+    document.body.style.backgroundColor = theme.bg;
+    document.body.style.color = theme.fg;
+    document.body.style.transition = 'background-color 0.2s';
+    // Clean up purely for safety, though not strictly necessary in top-level app
+    return () => {
+      document.body.style.margin = '';
+      document.body.style.padding = '';
+    };
+  }, [theme.bg, theme.fg]);
 
   // --- Helpers ---
   const findNodeAndParent = (root, targetId, parent = null) => {
@@ -105,18 +128,19 @@ export default function App() {
 
     const searchAndExpand = (node) => {
       let isMatch = false;
-      if (node.text.toLowerCase().includes(query)) {
+      // Robust check: ensure text exists before checking
+      if (node.text && node.text.toLowerCase().includes(query)) {
         matches.push(node.id);
         isMatch = true;
       }
+
       if (node.children && node.children.length > 0) {
         node.children.forEach(child => {
           const childHasMatch = searchAndExpand(child);
-          if (childHasMatch) isMatch = true;
+          if (childHasMatch) node.collapsed = false; 
         });
       }
-      if (isMatch) node.collapsed = false;
-      return isMatch;
+      return isMatch || (node.children && node.children.some(c => c.text.toLowerCase().includes(query)));
     };
 
     searchAndExpand(newTree);
@@ -131,35 +155,28 @@ export default function App() {
     setMatchIds([]);
     setCurrentMatchIndex(-1);
     if (searchInputRef.current) searchInputRef.current.blur();
-    // Return focus to the view root (or last focused item if possible)
     setFocusId(viewRootId);
     setFocusTrigger(t => t + 1);
   };
 
-  // --- Search Navigation Handlers ---
   const handleSearchKeyDown = (e) => {
-    // Escape: Always clear search
     if (e.key === 'Escape') {
       e.preventDefault();
       clearSearch();
       return;
     }
-
     if (matchIds.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      // Cycle Forward
       const nextIndex = (currentMatchIndex + 1) % matchIds.length;
       setCurrentMatchIndex(nextIndex);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      // Cycle Backward
       const nextIndex = (currentMatchIndex - 1 + matchIds.length) % matchIds.length;
       setCurrentMatchIndex(nextIndex);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      // Jump Focus to Selection
       if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
         setFocusId(matchIds[currentMatchIndex]);
         setFocusTrigger(t => t + 1);
@@ -188,7 +205,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization Logic ---
+  // --- Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -232,12 +249,13 @@ export default function App() {
   // --- Render Helper: Highlight Text ---
   const HighlightedText = ({ text, query }) => {
     if (!query) return <span>{text}</span>;
-    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    // Safe regex splitting
+    const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi'));
     return (
       <span>
         {parts.map((part, i) => 
           part.toLowerCase() === query.toLowerCase() ? (
-            <span key={i} style={{ backgroundColor: theme.matchBg, color: theme.matchFg, fontWeight: 'bold' }}>{part}</span>
+            <span key={i} style={{ backgroundColor: theme.textHighlightBg, color: theme.textHighlightFg, fontWeight: 'bold' }}>{part}</span>
           ) : (
             part
           )
@@ -339,11 +357,7 @@ export default function App() {
   };
 
   const toggleGlobalState = () => {
-    if (isAllExpanded) {
-      handleCollapseAll();
-    } else {
-      handleExpandAll();
-    }
+    if (isAllExpanded) handleCollapseAll(); else handleExpandAll();
   };
 
   const handleZoomOut = () => {
@@ -593,7 +607,6 @@ export default function App() {
         e.preventDefault();
         searchInputRef.current?.focus();
       }
-      
       // Help
       if (e.altKey && e.key === '/') {
         e.preventDefault();
@@ -606,7 +619,6 @@ export default function App() {
          e.preventDefault();
          handleZoomOut();
       }
-
       // Global Expand/Collapse
       if (e.ctrlKey && e.shiftKey && e.key === 'ArrowDown') {
         e.preventDefault();
@@ -616,7 +628,6 @@ export default function App() {
         e.preventDefault();
         handleCollapseAll();
       }
-
       // Enter on Empty State
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
@@ -669,16 +680,26 @@ export default function App() {
     const hasChildren = node.children && node.children.length > 0;
     const isEditing = focusId === node.id;
     const isMatch = matchIds.includes(node.id);
+    // Dim logic: ONLY dim if a search is active AND this specific node is NOT a match
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
+    // Fixed Box Model to prevent jitter
+    const commonTextStyle = {
+      fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
+      boxSizing: 'border-box', height: '32px', display: 'block', width: '100%', margin: 0
+    };
+
     return (
       <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0', 
-                      background: isSelectedMatch ? (darkMode ? '#333' : '#fff8dc') : 'transparent',
-                      borderRadius: '4px',
-                      opacity: isDimmed ? 0.25 : 1
+        {/* Row Container */}
+        <div style={{ 
+            display: 'flex', alignItems: 'center', padding: '2px 0', borderRadius: '4px',
+            opacity: isDimmed ? 0.4 : 1, // Increased visibility from 0.25 to 0.4 for readability
+            background: isSelectedMatch ? theme.activeMatchBg : 'transparent',
+            borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
         }}>
+          {/* Controls (Bullet/Arrow) */}
           <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' }}>
              <span 
                style={{
@@ -701,6 +722,7 @@ export default function App() {
              >•</span>
           </div>
           
+          {/* Content Area */}
           <div style={{ flex: 1, position: 'relative' }}>
             {isEditing ? (
               <input
@@ -709,22 +731,21 @@ export default function App() {
                 onChange={(e) => handleUpdateText(node.id, e.target.value)}
                 onKeyDown={(e) => handleItemKeyDown(e, node)}
                 onBlur={() => handleBlur(node.id)}
-                style={{
-                  border: 'none', outline: 'none', fontSize: '16px', width: '100%', padding: '4px', 
-                  background: 'transparent', color: theme.fg, fontFamily: 'inherit'
-                }} 
+                style={{ ...commonTextStyle, border: 'none', outline: 'none', background: 'transparent', color: theme.fg }} 
                 autoComplete="off"
               />
             ) : (
               <div 
                 onClick={() => setFocusId(node.id)}
-                style={{ fontSize: '16px', padding: '4px', minHeight: '26px', cursor: 'text' }}
+                style={{ ...commonTextStyle, cursor: 'text' }}
               >
                 <HighlightedText text={node.text} query={searchQuery} />
               </div>
             )}
           </div>
         </div>
+        
+        {/* Children (Rendered outside of the dimmed row so they can be opaque matches) */}
         {!node.collapsed && (
           <div style={{ borderLeft: `1px solid ${theme.border}`, marginLeft: '29px' }}>
             {node.children && node.children.map(child => renderNode(child))}
@@ -739,13 +760,15 @@ export default function App() {
   const currentViewNode = viewResult.node;
 
   return (
-    <div style={{ backgroundColor: theme.bg, minHeight: '100vh', color: theme.fg, transition: 'background-color 0.2s' }}>
+    // Outer Container is now handled by Global Style injection for background
+    <div style={{ minHeight: '100vh' }}>
       
       <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px' }}>
         
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h1 style={{ fontSize: '1.5rem', margin: 0, color: theme.dim }}>My Notes</h1>
+          
           <div style={{ position: 'relative' }}>
             <input 
               ref={searchInputRef}
@@ -759,17 +782,7 @@ export default function App() {
               }}
             />
             {searchQuery && (
-              <button 
-                onClick={clearSearch}
-                style={{
-                  position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', color: theme.dim, cursor: 'pointer', fontSize: '16px'
-                }}
-              >×</button>
-            )}
-            {matchIds.length > 0 && !searchQuery && (
-               /* Should usually not happen if cleared, but for safety */
-               null
+              <button onClick={clearSearch} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: theme.dim, cursor: 'pointer', fontSize: '16px' }}>×</button>
             )}
             {matchIds.length > 0 && searchQuery && (
               <div style={{ position: 'absolute', right: '30px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
@@ -777,6 +790,7 @@ export default function App() {
               </div>
             )}
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} onClick={() => setDarkMode(!darkMode)} title="Toggle Theme">{darkMode ? '☀️' : '🌙'}</button>
             <button style={{ background: 'none', border: 'none', color: theme.highlight, cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' }} onClick={toggleGlobalState}>{isAllExpanded ? 'Collapse All' : 'Expand All'}</button>
