@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-6';
+const STORAGE_KEY = 'workflowy-clone-v11-7';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.6 (Focus Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Search "Item" and press Enter.', collapsed: false, children: [] },
-      { id: '3', text: 'The cursor will now properly jump from the Search Bar to the Node.', collapsed: false, children: [
-         { id: '3-1', text: 'Item 1', collapsed: false, children: [] },
-         { id: '3-2', text: 'Item 2', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.7 (Smart Search Exit)', collapsed: false, children: [] },
+      { id: '2', text: 'Search for "Enter" below.', collapsed: false, children: [] },
+      { id: '3', text: 'When you hit Enter on a match, search clears automatically.', collapsed: false, children: [
+         { id: '3-1', text: 'You land right here, ready to type, with no search UI blocking you.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -25,13 +24,11 @@ const DEFAULT_STATE = {
 
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
-// Helper to escape regex characters
 const escapeRegExp = (string) => {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
 export default function App() {
-  // --- State ---
   const [state, setState] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return DEFAULT_STATE;
@@ -51,12 +48,10 @@ export default function App() {
   const [focusId, setFocusId] = useState(state.focusId);
   const [darkMode, setDarkMode] = useState(state.darkMode || false);
   
-  // Search
   const [searchQuery, setSearchQuery] = useState('');
   const [matchIds, setMatchIds] = useState([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1);
 
-  // UX
   const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -74,7 +69,7 @@ export default function App() {
     }));
   }, [tree, viewRootId, focusId, darkMode]);
 
-  // --- Theme Engine ---
+  // --- Theme ---
   const theme = darkMode ? {
     bg: '#1e1e1e', fg: '#e0e0e0', panel: '#2d2d2d', border: '#444', 
     highlight: '#007acc', dim: '#666', inputBg: '#2d2d2d',
@@ -89,7 +84,7 @@ export default function App() {
     textHighlightBg: '#fff3cd', textHighlightFg: '#000'
   };
 
-  // --- GLOBAL STYLE INJECTOR ---
+  // --- Global Styles ---
   useEffect(() => {
     document.body.style.margin = '0';
     document.body.style.padding = '0';
@@ -131,7 +126,6 @@ export default function App() {
         matches.push(node.id);
         isMatch = true;
       }
-
       if (node.children && node.children.length > 0) {
         node.children.forEach(child => {
           const childHasMatch = searchAndExpand(child);
@@ -147,13 +141,14 @@ export default function App() {
     setCurrentMatchIndex(0); 
   }, [searchQuery]); 
 
-  // --- Search Actions ---
-  const clearSearch = () => {
+  const clearSearch = (targetFocusId = null) => {
     setSearchQuery('');
     setMatchIds([]);
     setCurrentMatchIndex(-1);
     if (searchInputRef.current) searchInputRef.current.blur();
-    setFocusId(viewRootId);
+    
+    // If a specific target was requested (Enter key), go there. Otherwise go to view root.
+    setFocusId(targetFocusId || viewRootId);
     setFocusTrigger(t => t + 1);
   };
 
@@ -176,21 +171,15 @@ export default function App() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
-        // FIX: Explicitly blur the search input so the Focus Effect can run
-        if (searchInputRef.current) searchInputRef.current.blur();
-        
-        setFocusId(matchIds[currentMatchIndex]);
-        setFocusTrigger(t => t + 1);
+        const targetId = matchIds[currentMatchIndex];
+        // Pass targetId to clearSearch to exit search mode AND jump to node
+        clearSearch(targetId);
       }
     }
   };
 
-  // --- Focus Management ---
+  // --- Focus ---
   useEffect(() => {
-    // This effect moves focus to a list item.
-    // It purposefully DOES NOT run if the search bar is currently focused 
-    // to prevent cursor jumping while typing. 
-    // That is why we must .blur() the search bar when hitting Enter above.
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
@@ -246,12 +235,23 @@ export default function App() {
         }
       }
     }
+
+    // Check if tree is fully expanded on load
+    const checkAllExpanded = (node) => {
+      if (node.collapsed && node.children && node.children.length > 0) return false;
+      if (node.children) return node.children.every(checkAllExpanded);
+      return true;
+    };
+    if (checkAllExpanded(cleanTree)) {
+      setIsAllExpanded(true);
+    }
+
     setTree(cleanTree);
     setFocusId(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // --- Render Helper ---
+  // --- Render Helpers ---
   const HighlightedText = ({ text, query }) => {
     if (!query) return <span>{text}</span>;
     const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi'));
@@ -682,7 +682,6 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // Box Model Lock
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', height: '32px', display: 'block', width: '100%', margin: 0
@@ -773,7 +772,7 @@ export default function App() {
               }}
             />
             {searchQuery && (
-              <button onClick={clearSearch} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: theme.dim, cursor: 'pointer', fontSize: '16px' }}>×</button>
+              <button onClick={() => clearSearch()} style={{ position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: theme.dim, cursor: 'pointer', fontSize: '16px' }}>×</button>
             )}
             {matchIds.length > 0 && searchQuery && (
               <div style={{ position: 'absolute', right: '30px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
