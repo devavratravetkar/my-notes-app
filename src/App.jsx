@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-21';
+const STORAGE_KEY = 'workflowy-clone-v13-22';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,15 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.21 (Sanitizer Fully Active)', collapsed: false, children: [] },
-      { id: '2', text: 'Test 1: Add shift+enter newlines here.\n\n\n', collapsed: false, children: [] },
-      { id: '3', text: 'Test 2: Arrow Down.', collapsed: false, children: [
-         { id: '3-1', text: 'The node above will now snap shut instantly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.22 (Active Sanitization)', collapsed: false, children: [] },
+      { id: '2', text: 'Test: Add Shift+Enter newlines here.\n\n\n', collapsed: false, children: [] },
+      { id: '3', text: 'Now press Arrow Down.', collapsed: false, children: [
+         { id: '3-1', text: 'It snaps shut INSTANTLY because the Arrow Key handler now actively sanitizes the node you are leaving.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Structure:', collapsed: false, children: [
-         { id: '4-1', text: 'Child 1', collapsed: false, children: [] }
-      ]},
-      { id: '5', text: 'Backspace Merge & Context-Aware moves still work perfectly.', collapsed: false, children: [] }
+      { id: '4', text: 'All other features (Move, Merge, Context-Awareness) are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -237,7 +234,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization & Safety ---
+  // --- Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -330,7 +327,6 @@ export default function App() {
     });
   };
 
-  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
@@ -351,15 +347,12 @@ export default function App() {
 
             const hasChildren = result.node.children && result.node.children.length > 0;
             
-            // Delete CURRENT if empty & childless
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx !== -1) {
                     result.parent.children.splice(idx, 1);
                 }
-            } 
-            // Delete PREVIOUS if empty & childless
-            else if (result.parent) {
+            } else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
                     const prevNode = result.parent.children[idx - 1];
@@ -521,8 +514,9 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
-    // ALLOW BLUR ON ENTER (Split) to clean up old node
-    // skipBlurRef.current = true; // REMOVED
+    if (cursor > 0) {
+        skipBlurRef.current = true;
+    }
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -543,7 +537,6 @@ export default function App() {
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
-            // INSERT SPACER ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
@@ -551,7 +544,6 @@ export default function App() {
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
         } else if (shouldSplitIntoChild) {
-            // SPLIT TO CHILD
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -564,7 +556,6 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
-            // SPLIT TO SIBLING
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -586,7 +577,7 @@ export default function App() {
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
-    skipBlurRef.current = true; // KEEP SKIP BLUR for deletes
+    skipBlurRef.current = true;
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -596,7 +587,6 @@ export default function App() {
         
         if (node.children && node.children.length > 0) {
            const idx = parent.children.findIndex(c => c.id === id);
-           // Handle Unindent with Children
            if (idx === 0 && parent.id !== viewRootId) {
                const gpResult = findNodeAndParent(newTree, parent.id);
                if(gpResult && gpResult.parent) {
@@ -615,7 +605,6 @@ export default function App() {
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
           
-          // CONTEXT AWARE BACKSPACE (Move In)
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
@@ -628,7 +617,6 @@ export default function App() {
               return newTree;
           }
 
-          // MERGE
           let cursorTarget = prevSibling.text.length; 
           
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
@@ -765,9 +753,17 @@ export default function App() {
     }
 
     e.preventDefault();
-    // WE ALLOW BLUR ON ARROW NAV to trigger cleanup
-    // skipBlurRef.current = true; // REMOVED
     
+    // NEW: Active Sanitization on Arrow
+    setTree(prev => {
+        const newTree = cloneTree(prev);
+        const res = findNodeAndParent(newTree, id);
+        if(res && res.node) {
+            res.node.text = res.node.text.trim().replace(/\n{3,}/g, '\n\n');
+        }
+        return newTree;
+    });
+
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
     const { node: viewRoot } = result;
