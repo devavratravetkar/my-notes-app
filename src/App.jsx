@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9-7';
+const STORAGE_KEY = 'workflowy-clone-v9-8';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Try to erase the text below completely, then click away.', collapsed: false, children: [] },
-      { id: '2', text: '...', collapsed: false, children: [
-        { id: '2-1', text: 'I am a child node.', collapsed: false, children: [] },
+      { id: '1', text: 'Welcome! Try Shift + Up/Down now.', collapsed: false, children: [] },
+      { id: '2', text: 'Structure:', collapsed: false, children: [
+        { id: '2-1', text: 'Top Item', collapsed: false, children: [] },
+        { id: '2-2', text: 'Bottom Item', collapsed: false, children: [] }
       ]},
-      { id: '3', text: 'It will automatically revert to "..." to prevent ghost nodes.', collapsed: false, children: [] },
+      { id: '3', text: 'You can move this node INTO "Structure" just by pressing Shift+Up!', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -168,12 +169,10 @@ export default function App() {
     }
   };
 
-  // NEW: Handle Blur to prevent ghost parents
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (result && result.node) {
-      // If node is empty BUT has children, reset text to "..."
       if (result.node.text.trim() === '' && result.node.children && result.node.children.length > 0) {
         result.node.text = "...";
         setTree(newTree);
@@ -253,7 +252,76 @@ export default function App() {
     }
   };
 
-  // --- List Item Logic ---
+  // --- FLUID MOVE NODE (The Fix) ---
+  const handleMoveNode = (e, id, direction) => {
+    e.preventDefault();
+    const newTree = cloneTree(tree);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { node, parent } = result;
+    const index = parent.children.findIndex(c => c.id === id);
+
+    if (direction === 'up') {
+      // Case 1: Has Previous Sibling
+      if (index > 0) {
+         const prevSibling = parent.children[index - 1];
+         // Logic: If Prev is Expanded & Has Children -> Move INTO (as last child)
+         if (!prevSibling.collapsed && prevSibling.children && prevSibling.children.length > 0) {
+             parent.children.splice(index, 1);
+             prevSibling.children.push(node);
+         } else {
+             // Standard Swap
+             parent.children[index] = prevSibling;
+             parent.children[index - 1] = node;
+         }
+      } 
+      // Case 2: At Top -> Move OUT (Unindent)
+      else {
+         if (parent.id === viewRootId || parent.id === 'root') return; // Cannot move out of view
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+             parent.children.splice(index, 1); // Remove from current
+             grandParent.children.splice(parentIndex, 0, node); // Insert BEFORE parent
+         }
+      }
+    } 
+    else if (direction === 'down') {
+      // Case 1: Has Next Sibling
+      if (index < parent.children.length - 1) {
+         const nextSibling = parent.children[index + 1];
+         // Logic: If Next is Expanded & Has Children -> Move INTO (as first child)
+         if (!nextSibling.collapsed && nextSibling.children && nextSibling.children.length > 0) {
+             parent.children.splice(index, 1);
+             nextSibling.children.unshift(node);
+         } else {
+             // Standard Swap
+             parent.children[index] = nextSibling;
+             parent.children[index + 1] = node;
+         }
+      } 
+      // Case 2: At Bottom -> Move OUT (Unindent)
+      else {
+         if (parent.id === viewRootId || parent.id === 'root') return; // Cannot move out of view
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+             parent.children.splice(index, 1); // Remove from current
+             grandParent.children.splice(parentIndex + 1, 0, node); // Insert AFTER parent
+         }
+      }
+    }
+
+    setTree(newTree);
+    setFocusId(id);
+    setFocusTrigger(t => t + 1);
+  };
+
+
+  // --- Standard List Logic ---
 
   const handleShiftTab = (e, id) => {
     e.preventDefault();
@@ -357,31 +425,6 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  const handleMoveNode = (e, id, direction) => {
-    e.preventDefault();
-    const newTree = cloneTree(tree);
-    const result = findNodeAndParent(newTree, id);
-    if (!result || !result.parent) return;
-    
-    const { parent } = result;
-    const index = parent.children.findIndex(c => c.id === id);
-    if (direction === 'up' && index > 0) {
-       const temp = parent.children[index];
-       parent.children[index] = parent.children[index - 1];
-       parent.children[index - 1] = temp;
-       setTree(newTree);
-       setFocusId(id);
-       setFocusTrigger(t => t + 1);
-    } else if (direction === 'down' && index < parent.children.length - 1) {
-       const temp = parent.children[index];
-       parent.children[index] = parent.children[index + 1];
-       parent.children[index + 1] = temp;
-       setTree(newTree);
-       setFocusId(id);
-       setFocusTrigger(t => t + 1);
-    }
-  };
-
   const handleArrow = (e, id, direction) => {
     e.preventDefault();
     const result = findNodeAndParent(tree, viewRootId);
@@ -446,7 +489,6 @@ export default function App() {
          handleZoomOut();
       }
 
-      // Enter on Empty State (Restored)
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
@@ -529,7 +571,7 @@ export default function App() {
             value={node.text}
             onChange={(e) => handleUpdateText(node.id, e.target.value)}
             onKeyDown={(e) => handleItemKeyDown(e, node)}
-            onBlur={() => handleBlur(node.id)} // Added blur handler
+            onBlur={() => handleBlur(node.id)}
             style={styles.input} autoComplete="off"
           />
         </div>
