@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-5';
+const STORAGE_KEY = 'workflowy-clone-v11-6';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.5 (Edge-to-Edge)', collapsed: false, children: [] },
-      { id: '2', text: 'The white border is gone. Dark mode covers the whole screen.', collapsed: false, children: [] },
-      { id: '3', text: 'Search highlights are now consistent:', collapsed: false, children: [
-         { id: '3-1', text: 'apple (I am opaque)', collapsed: false, children: [] },
-         { id: '3-2', text: 'banana (I am dimmed)', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.6 (Focus Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Search "Item" and press Enter.', collapsed: false, children: [] },
+      { id: '3', text: 'The cursor will now properly jump from the Search Bar to the Node.', collapsed: false, children: [
+         { id: '3-1', text: 'Item 1', collapsed: false, children: [] },
+         { id: '3-2', text: 'Item 2', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -25,7 +25,7 @@ const DEFAULT_STATE = {
 
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
-// Helper to escape regex characters for safe highlighting
+// Helper to escape regex characters
 const escapeRegExp = (string) => {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
@@ -89,14 +89,13 @@ export default function App() {
     textHighlightBg: '#fff3cd', textHighlightFg: '#000'
   };
 
-  // --- GLOBAL STYLE INJECTOR (Fixes White Border) ---
+  // --- GLOBAL STYLE INJECTOR ---
   useEffect(() => {
     document.body.style.margin = '0';
     document.body.style.padding = '0';
     document.body.style.backgroundColor = theme.bg;
     document.body.style.color = theme.fg;
     document.body.style.transition = 'background-color 0.2s';
-    // Clean up purely for safety, though not strictly necessary in top-level app
     return () => {
       document.body.style.margin = '';
       document.body.style.padding = '';
@@ -128,7 +127,6 @@ export default function App() {
 
     const searchAndExpand = (node) => {
       let isMatch = false;
-      // Robust check: ensure text exists before checking
       if (node.text && node.text.toLowerCase().includes(query)) {
         matches.push(node.id);
         isMatch = true;
@@ -178,6 +176,9 @@ export default function App() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
+        // FIX: Explicitly blur the search input so the Focus Effect can run
+        if (searchInputRef.current) searchInputRef.current.blur();
+        
         setFocusId(matchIds[currentMatchIndex]);
         setFocusTrigger(t => t + 1);
       }
@@ -186,6 +187,10 @@ export default function App() {
 
   // --- Focus Management ---
   useEffect(() => {
+    // This effect moves focus to a list item.
+    // It purposefully DOES NOT run if the search bar is currently focused 
+    // to prevent cursor jumping while typing. 
+    // That is why we must .blur() the search bar when hitting Enter above.
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
@@ -246,10 +251,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // --- Render Helper: Highlight Text ---
+  // --- Render Helper ---
   const HighlightedText = ({ text, query }) => {
     if (!query) return <span>{text}</span>;
-    // Safe regex splitting
     const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, 'gi'));
     return (
       <span>
@@ -602,24 +606,20 @@ export default function App() {
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // Search
       if (e.ctrlKey && e.key === '/') {
         e.preventDefault();
         searchInputRef.current?.focus();
       }
-      // Help
       if (e.altKey && e.key === '/') {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
       
-      // Zoom Out
       if (e.ctrlKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
       }
-      // Global Expand/Collapse
       if (e.ctrlKey && e.shiftKey && e.key === 'ArrowDown') {
         e.preventDefault();
         handleExpandAll();
@@ -628,7 +628,6 @@ export default function App() {
         e.preventDefault();
         handleCollapseAll();
       }
-      // Enter on Empty State
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
@@ -680,11 +679,10 @@ export default function App() {
     const hasChildren = node.children && node.children.length > 0;
     const isEditing = focusId === node.id;
     const isMatch = matchIds.includes(node.id);
-    // Dim logic: ONLY dim if a search is active AND this specific node is NOT a match
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // Fixed Box Model to prevent jitter
+    // Box Model Lock
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', height: '32px', display: 'block', width: '100%', margin: 0
@@ -692,14 +690,12 @@ export default function App() {
 
     return (
       <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg }}>
-        {/* Row Container */}
         <div style={{ 
             display: 'flex', alignItems: 'center', padding: '2px 0', borderRadius: '4px',
-            opacity: isDimmed ? 0.4 : 1, // Increased visibility from 0.25 to 0.4 for readability
-            background: isSelectedMatch ? theme.activeMatchBg : 'transparent',
+            opacity: isDimmed ? 0.4 : 1,
+            background: isSelectedMatch ? theme.activeMatchBg : (isMatch ? theme.matchRowBg : 'transparent'),
             borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
         }}>
-          {/* Controls (Bullet/Arrow) */}
           <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' }}>
              <span 
                style={{
@@ -722,7 +718,6 @@ export default function App() {
              >•</span>
           </div>
           
-          {/* Content Area */}
           <div style={{ flex: 1, position: 'relative' }}>
             {isEditing ? (
               <input
@@ -744,8 +739,6 @@ export default function App() {
             )}
           </div>
         </div>
-        
-        {/* Children (Rendered outside of the dimmed row so they can be opaque matches) */}
         {!node.collapsed && (
           <div style={{ borderLeft: `1px solid ${theme.border}`, marginLeft: '29px' }}>
             {node.children && node.children.map(child => renderNode(child))}
@@ -760,9 +753,7 @@ export default function App() {
   const currentViewNode = viewResult.node;
 
   return (
-    // Outer Container is now handled by Global Style injection for background
     <div style={{ minHeight: '100vh' }}>
-      
       <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px' }}>
         
         {/* Header */}
