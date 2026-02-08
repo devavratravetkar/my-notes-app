@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-37';
+const STORAGE_KEY = 'workflowy-clone-v13-38';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,9 +10,9 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.37 (Build Fix)', collapsed: false, children: [] },
-      { id: '2', text: 'We removed the unused variables that were causing the Netlify build to fail.', collapsed: false, children: [] },
-      { id: '3', text: 'Everything else is identical to the high-performance v13.36 build.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.38 (Build Error Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "Symbol prev has already been declared" error.', collapsed: false, children: [] },
+      { id: '3', text: 'Now the production build will succeed.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -63,10 +63,6 @@ const parseTextToNodes = (text) => {
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const truncate = (str, n) => {
-  return (str && str.length > n) ? str.substr(0, n - 1) + '...' : str;
-};
-
 // Helper to find a node and its parent in the tree
 const findRes = (root, id, parent = null) => {
   if (root.id === id) return { node: root, parent };
@@ -96,6 +92,7 @@ const updateNodeInTree = (node, id, transform) => {
   if (node.id === id) return transform(node);
   if (!node.children) return node;
   
+  // Optimization: Only clone path to node
   const childIndex = node.children.findIndex(c => c.id === id || containsId(c, id));
   if (childIndex === -1) return node;
 
@@ -134,6 +131,7 @@ const NodeItem = React.memo(({
           background: isSelectedMatch ? theme.activeMatchBg : (isMatch ? theme.matchRowBg : 'transparent'),
           borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
       }}>
+        {/* Bullet / Controls */}
         <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px', paddingTop: '4px' }}>
            <span 
              style={{
@@ -156,11 +154,14 @@ const NodeItem = React.memo(({
            >•</span>
         </div>
         
+        {/* Content Area (Grid Hack) */}
         <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
+          {/* Invisible sizing div */}
           <div style={{ ...commonTextStyle, gridArea: '1 / 1', visibility: 'hidden', pointerEvents: 'none' }}>
              {node.text + ' '}
           </div>
 
+          {/* Visible Input */}
           <textarea
             id={`input-${node.id}`}
             value={node.text}
@@ -181,6 +182,7 @@ const NodeItem = React.memo(({
             }} 
           />
           
+          {/* Search Highlight */}
           {searchQuery && (
             <div style={{ ...commonTextStyle, gridArea: '1 / 1', visibility: 'visible', pointerEvents: 'none', color: theme.fg, zIndex: 2 }}>
                {node.text.split(new RegExp(`(${escapeRegExp(searchQuery)})`, 'gi')).map((part, i) => 
@@ -381,21 +383,21 @@ export default function App() {
           }
 
           if(idx > 0) {
-              const prevNode = parent.children[idx-1];
-              if(prevNode.children && prevNode.children.length > 0 && !prevNode.collapsed) {
+              const prevSibling = parent.children[idx-1]; // RENAMED FROM prev to prevSibling to avoid conflict
+              if(prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
                   parent.children.splice(idx,1);
-                  prevNode.children.push(node);
+                  prevSibling.children.push(node);
                   setTimeout(() => { setFocusId(node.id); cursorGoalRef.current='start'; },0);
               } else {
-                  const cursor = prevNode.text.length + (prevNode.text && node.text ? 1 : 0);
-                  if(prevNode.text && node.text) prevNode.text += " ";
-                  prevNode.text += node.text;
+                  const cursor = prevSibling.text.length + (prevSibling.text && node.text ? 1 : 0);
+                  if(prevSibling.text && node.text) prevSibling.text += " ";
+                  prevSibling.text += node.text;
                   parent.children.splice(idx,1);
-                  if(node.children && node.children.length) {
-                      prevNode.children = [...prevNode.children, ...node.children];
-                      prevNode.collapsed = false;
+                  if(node.children.length) {
+                      prevSibling.children = [...prevSibling.children, ...node.children];
+                      prevSibling.collapsed = false;
                   }
-                  setTimeout(() => { setFocusId(prevNode.id); cursorGoalRef.current=cursor; },0);
+                  setTimeout(() => { setFocusId(prevSibling.id); cursorGoalRef.current=cursor; },0);
               }
           } else if(parent.id !== viewRootId) {
               const gpRes = findRes(newTree, parent.id);
@@ -440,12 +442,12 @@ export default function App() {
           
           if(dir==='up') {
               if(idx > 0) {
-                  const prev = parent.children[idx-1];
-                  if(!prev.collapsed && prev.children && prev.children.length > 0) {
+                  const prevSibling = parent.children[idx-1]; // RENAMED FROM prev to prevSibling
+                  if(!prevSibling.collapsed && prevSibling.children && prevSibling.children.length > 0) {
                       parent.children.splice(idx,1);
-                      prev.children.push(node);
+                      prevSibling.children.push(node);
                   } else {
-                      parent.children[idx] = prev;
+                      parent.children[idx] = prevSibling;
                       parent.children[idx-1] = node;
                   }
               } else if(parent.id !== viewRootId) {
@@ -490,11 +492,11 @@ export default function App() {
           const {node, parent} = res;
           const idx = parent.children.findIndex(c=>c.id===id);
           if(idx === 0) return prev;
-          const prev = parent.children[idx-1];
+          const prevSibling = parent.children[idx-1]; // RENAMED FROM prev to prevSibling
           parent.children.splice(idx,1);
-          if(!prev.children) prev.children = [];
-          prev.children.push(node);
-          prev.collapsed = false;
+          if(!prevSibling.children) prevSibling.children = [];
+          prevSibling.children.push(node);
+          prevSibling.collapsed = false;
           setTimeout(() => { setFocusId(id); cursorGoalRef.current='end'; }, 0);
           return newTree;
       });
@@ -679,7 +681,7 @@ export default function App() {
     <div style={{ minHeight: '100vh', backgroundColor: theme.bg, color: theme.fg, fontFamily: 'sans-serif', padding: '40px' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-           <h1 style={{ cursor: 'pointer', margin:0 }} onClick={handleGoHome}>Workflowy v13.37</h1>
+           <h1 style={{ cursor: 'pointer', margin:0 }} onClick={handleGoHome}>Workflowy v13.38</h1>
            <div style={{ display: 'flex', gap: '10px' }}>
              <button onClick={() => setShowExport(true)}>Export</button>
              <button onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀️' : '🌙'}</button>
