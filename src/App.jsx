@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-33';
+const STORAGE_KEY = 'workflowy-clone-v13-34';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,14 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.33 (The "Silver Bullet" Fix)', collapsed: false, children: [] },
-      { id: '2', text: 'We replaced the JS resizing engine with a CSS Grid system.', collapsed: false, children: [] },
-      { id: '3', text: 'Performance Test:', collapsed: false, children: [
-         { id: '3-1', text: 'Zoom in and out as fast as you want.', collapsed: false, children: [] },
-         { id: '3-2', text: 'The "Flicker" and "Freeze" are gone because JavaScript is no longer calculating pixel heights.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.34 (Smart Scroll)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "Layout Thrashing" by making the scrolling logic smarter.', collapsed: false, children: [] },
+      { id: '3', text: 'Test this:', collapsed: false, children: [
+         { id: '3-1', text: 'Zoom into this node.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Now Zoom Out (Alt+Shift+Left) repeatedly.', collapsed: false, children: [] },
+         { id: '3-3', text: 'The view should remain stable without jumping or flickering.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Navigation and Deep Linking are preserved.', collapsed: false, children: [] }
+      { id: '4', text: 'The app only forces a scroll if your cursor is actually off-screen.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -277,7 +278,7 @@ export default function App() {
     }
   };
 
-  // --- Focus Management ---
+  // --- Focus Management (SMART SCROLL) ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
@@ -295,8 +296,15 @@ export default function App() {
              }
              cursorGoalRef.current = null;
            }
+           
+           // SMART SCROLL: Only scroll if NOT visible
            const rect = el.getBoundingClientRect();
-           if (rect.bottom > window.innerHeight || rect.top < 0) {
+           const isVisible = (
+             rect.top >= 0 &&
+             rect.bottom <= (window.innerHeight || document.documentElement.clientHeight)
+           );
+
+           if (!isVisible) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         } else {
@@ -1013,10 +1021,9 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // EXACT STYLING MUST MATCH HIDDEN DIV AND TEXTAREA FOR GRID HACK
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
-      minHeight: '32px', boxSizing: 'border-box', width: '100%',
+      boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
       whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word'
     };
 
@@ -1055,10 +1062,10 @@ export default function App() {
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
-               visibility: 'hidden', // Invisible but takes up space
+               visibility: 'hidden',
                pointerEvents: 'none'
             }}>
-               {node.text + ' '} {/* Append space to prevent jump at end of line */}
+               {node.text + ' '}
             </div>
 
             {/* Visible Input */}
