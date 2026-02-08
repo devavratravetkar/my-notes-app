@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-30';
+const STORAGE_KEY = 'workflowy-clone-v13-31';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.30 (Performance Optimized)', collapsed: false, children: [] },
-      { id: '2', text: 'We extracted the Textarea into a dedicated component.', collapsed: false, children: [] },
-      { id: '3', text: 'Try Zooming In/Out quickly here.', collapsed: false, children: [
-         { id: '3-1', text: 'It should be buttery smooth now.', collapsed: false, children: [] },
-         { id: '3-2', text: 'No more "cursor blinking" or "freezing" because we stopped forcing layout recalculations on every render.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.31 (Stability & Performance)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "Collapsing Textarea" bug.', collapsed: false, children: [] },
+      { id: '3', text: 'Try Zooming / Navigating:', collapsed: false, children: [
+         { id: '3-1', text: 'It should remain buttery smooth.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Text should not disappear or shrink unexpectedly.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'All previous features (Deep Links, Cleanup, Context Moves) are preserved.', collapsed: false, children: [] }
+      { id: '4', text: 'All previous features (Deep Links, Export, Drag/Drop) are active.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -84,17 +84,17 @@ const treeToString = (node, depth = 0) => {
 };
 
 // --- OPTIMIZED COMPONENT: AutoResizingTextarea ---
-// Isolates layout thrashing. Only resizes when 'value' changes.
 const AutoResizingTextarea = ({ value, style, ...props }) => {
   const textareaRef = useRef(null);
 
+  // 1. Resize on value change (Typing)
   useLayoutEffect(() => {
     if (textareaRef.current) {
-      // Reset height to auto to correctly calculate scrollHeight for shrinking text
+      // Reset to auto temporarily to get correct scrollHeight for shrinking
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
-  }, [value]); // CRITICAL: Only run when text changes, NOT on every parent render/zoom
+  }, [value]);
 
   return (
     <textarea
@@ -102,9 +102,10 @@ const AutoResizingTextarea = ({ value, style, ...props }) => {
       value={value}
       style={{
         ...style,
-        height: 'auto', // Initial render
+        // FIX: Removed height: 'auto' from here to prevent collapse on parent re-renders
         resize: 'none',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        display: 'block' // Ensure block layout
       }}
       {...props}
     />
@@ -114,9 +115,9 @@ const AutoResizingTextarea = ({ value, style, ...props }) => {
 export default function App() {
   // --- State ---
   const [state, setState] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return DEFAULT_STATE;
     try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return DEFAULT_STATE;
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
@@ -127,11 +128,14 @@ export default function App() {
     }
   });
 
-  const [tree, setTree] = useState(state.tree);
+  const [tree, setTree] = useState(state.tree || DEFAULT_STATE.tree);
   
+  // -- DEEP LINKING --
   const [viewRootId, setViewRootId] = useState(() => {
-    const hash = window.location.hash.replace('#', '');
-    return hash || (state.viewRootId || 'root');
+    try {
+      const hash = window.location.hash.replace('#', '');
+      return hash || (state.viewRootId || 'root');
+    } catch (e) { return 'root'; }
   });
 
   const [focusId, setFocusId] = useState(state.focusId);
@@ -309,8 +313,11 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           // We only handle cursor position here now; height is handled by AutoResizingTextarea
            if (el.tagName === 'TEXTAREA') {
+             // Force one resize on focus to be safe
+             el.style.height = 'auto';
+             el.style.height = el.scrollHeight + 'px';
+
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -399,19 +406,6 @@ export default function App() {
         )}
       </span>
     );
-  };
-
-  // --- Handlers ---
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
   };
 
   const handleUpdateText = (id, newText) => {
@@ -940,6 +934,97 @@ export default function App() {
     }
   };
 
+  // --- Global Keyboard Shortcuts ---
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.ctrlKey && e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (e.altKey && e.key === '/') {
+        e.preventDefault();
+        setShowHelp(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+          setShowHelp(false);
+          setShowExport(false);
+      }
+      if (e.altKey && e.key === 'h') {
+         e.preventDefault();
+         handleGoHome();
+      }
+      if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
+         e.preventDefault();
+         handleZoomOut();
+      }
+      if (e.altKey && e.shiftKey && e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleExpandAll();
+      }
+      if (e.altKey && e.shiftKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleCollapseAll();
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        const activeTag = document.activeElement.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+           e.preventDefault();
+           if (lastFocusRef.current) {
+             const exists = findNodeAndParent(tree, lastFocusRef.current);
+             if (exists && exists.node) {
+               setFocusId(lastFocusRef.current);
+               cursorGoalRef.current = 'end';
+               setFocusTrigger(t => t + 1);
+               return;
+             }
+           }
+           const result = findNodeAndParent(tree, viewRootId);
+           if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
+               handleAddFirstChild();
+           } else if (result && result.node && result.node.children.length > 0) {
+               setFocusId(result.node.children[0].id);
+               cursorGoalRef.current = 'start';
+               setFocusTrigger(t => t+1);
+           }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [tree, viewRootId, showHelp]);
+
+  // --- Drag and Drop ---
+  const handleDragStart = (e, id) => {
+    setDraggedId(id);
+    skipBlurRef.current = true;
+    e.dataTransfer.effectAllowed = "move";
+    e.target.style.opacity = '0.5';
+  };
+  const handleDragEnd = (e) => { e.target.style.opacity = '1'; setDraggedId(null); };
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId) return;
+    const newTree = cloneTree(tree);
+    if (isDescendant(newTree, draggedId, targetId)) {
+      alert("Cannot move node into its own child");
+      return;
+    }
+    const sourceResult = findNodeAndParent(newTree, draggedId);
+    const targetResult = findNodeAndParent(newTree, targetId);
+    if (!sourceResult || !sourceResult.parent || !targetResult || !targetResult.parent) return;
+    const { node: sourceNode, parent: sourceParent } = sourceResult;
+    const { parent: targetParent } = targetResult;
+    const sourceIndex = sourceParent.children.findIndex(c => c.id === draggedId);
+    sourceParent.children.splice(sourceIndex, 1);
+    const freshTargetResult = findNodeAndParent(newTree, targetId);
+    const freshTargetParent = freshTargetResult.parent;
+    const targetIndex = freshTargetParent.children.findIndex(c => c.id === targetId);
+    freshTargetParent.children.splice(targetIndex, 0, sourceNode);
+    setTree(newTree);
+    setFocusTrigger(t => t + 1);
+    setFocusId(draggedId);
+  };
+
   // --- Renderers ---
   const renderNode = (node) => {
     const hasChildren = node.children && node.children.length > 0;
@@ -983,7 +1068,6 @@ export default function App() {
                onDrop={(e) => handleDrop(e, node.id)}
              >•</span>
           </div>
-          
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
             <div style={{
                ...commonTextStyle,
@@ -994,7 +1078,6 @@ export default function App() {
             }}>
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
-
             <AutoResizingTextarea
               id={`input-${node.id}`}
               value={node.text}
