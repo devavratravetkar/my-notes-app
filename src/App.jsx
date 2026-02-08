@@ -2,16 +2,16 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v4';
+const STORAGE_KEY = 'workflowy-clone-v5';
 
 const INITIAL_DATA = {
   id: 'root',
   text: 'Home',
   collapsed: false,
   children: [
-    { id: '1', text: 'Welcome! Press ? or click "Help" for shortcuts.', collapsed: false, children: [] },
-    { id: '2', text: 'Hover bullet to drag, Click to zoom', collapsed: false, children: [] },
-    { id: '3', text: 'Click triangle to toggle children', collapsed: false, children: [
+    { id: '1', text: 'Welcome! Press Alt + ? for shortcuts.', collapsed: false, children: [] },
+    { id: '2', text: 'Use Ctrl + Arrows to zoom/collapse', collapsed: false, children: [] },
+    { id: '3', text: 'Use Shift + Up/Down to move items', collapsed: false, children: [
       { id: '3-1', text: 'Nested item 1', collapsed: false, children: [] },
     ]},
   ]
@@ -49,17 +49,23 @@ export default function App() {
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // 1. Help Toggle
-      if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+      // 1. Help Toggle (Alt + ?)
+      if (e.altKey && e.key === '?') {
+        e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
 
-      // 2. Handle "Enter" on Empty Page (The Fix)
-      // We check if we are currently viewing a node that has NO children
-      if (e.key === 'Enter') {
+      // 2. Zoom Out (Ctrl + Left) - Global context
+      if (e.ctrlKey && e.key === 'ArrowLeft') {
+         e.preventDefault();
+         handleZoomOut();
+      }
+
+      // 3. Handle "Enter" on Empty Page
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        // Only if we aren't focused on an input (handled locally) or if list is empty
         const { node: currentViewNode } = findNodeAndParent(tree, viewRootId);
-        // If list is empty, Create first child
         if (currentViewNode && currentViewNode.children.length === 0) {
           e.preventDefault();
           handleAddFirstChild();
@@ -67,10 +73,9 @@ export default function App() {
       }
     };
     
-    // We attach this listener to the window so it works even if no input is focused
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [tree, viewRootId, showHelp]); // Re-bind when tree/view changes
+  }, [tree, viewRootId, showHelp]);
 
   // --- Helpers ---
   const findNodeAndParent = (root, targetId, parent = null) => {
@@ -113,25 +118,38 @@ export default function App() {
   };
 
   const handleToggleCollapse = (e, id) => {
-    e.stopPropagation();
+    e && e.stopPropagation();
     const newTree = cloneTree(tree);
     const { node } = findNodeAndParent(newTree, id);
     if (node) node.collapsed = !node.collapsed;
     setTree(newTree);
   };
+  
+  // Explicit collapse/expand for keyboard shortcuts
+  const setCollapseState = (id, shouldCollapse) => {
+    const newTree = cloneTree(tree);
+    const { node } = findNodeAndParent(newTree, id);
+    if (node) node.collapsed = shouldCollapse;
+    setTree(newTree);
+  };
 
-  // NEW: Helper to add the very first child to a node
+  const handleZoomOut = () => {
+     if (viewRootId === 'root') return;
+     const { parent } = findNodeAndParent(tree, viewRootId);
+     if (parent) setViewRootId(parent.id);
+  };
+
   const handleAddFirstChild = () => {
     const newTree = cloneTree(tree);
     const { node } = findNodeAndParent(newTree, viewRootId);
     if (!node) return;
-    
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
     node.children.push(newNode);
-    
     setTree(newTree);
     setFocusId(newNode.id);
   };
+
+  // --- Keyboard Logic (Node Specific) ---
 
   const handleEnter = (e, id) => {
     e.preventDefault();
@@ -196,6 +214,68 @@ export default function App() {
     grandParent.children.splice(parentIndex + 1, 0, node);
     setTree(newTree);
     setFocusId(id);
+  };
+
+  const handleMoveNode = (e, id, direction) => {
+    e.preventDefault();
+    const newTree = cloneTree(tree);
+    const { parent } = findNodeAndParent(newTree, id);
+    if (!parent) return;
+    
+    const index = parent.children.findIndex(c => c.id === id);
+    if (direction === 'up' && index > 0) {
+       // Swap with prev
+       const temp = parent.children[index];
+       parent.children[index] = parent.children[index - 1];
+       parent.children[index - 1] = temp;
+       setTree(newTree);
+       setFocusId(id);
+    } else if (direction === 'down' && index < parent.children.length - 1) {
+       // Swap with next
+       const temp = parent.children[index];
+       parent.children[index] = parent.children[index + 1];
+       parent.children[index + 1] = temp;
+       setTree(newTree);
+       setFocusId(id);
+    }
+  };
+
+  const handleKeyDown = (e, node) => {
+    // 1. Enter
+    if (e.key === 'Enter') handleEnter(e, node.id);
+    // 2. Backspace
+    if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
+    // 3. Tab
+    if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
+    // 4. Shift + Tab
+    if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
+
+    // 5. Navigation & Zoom (Ctrl + Arrows)
+    if (e.ctrlKey && e.key === 'ArrowRight') {
+       e.preventDefault();
+       setViewRootId(node.id); // Zoom In
+    }
+    // Ctrl + Left handled in Global (to allow unzooming from anywhere)
+
+    // 6. Expand/Collapse (Ctrl + Up/Down)
+    if (e.ctrlKey && e.key === 'ArrowDown') {
+       e.preventDefault();
+       setCollapseState(node.id, false); // Expand
+    }
+    if (e.ctrlKey && e.key === 'ArrowUp') {
+       e.preventDefault();
+       setCollapseState(node.id, true); // Collapse
+    }
+
+    // 7. Reorder (Shift + Up/Down)
+    if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
+    if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
+
+    // 8. Navigation (Plain Up/Down) - Must be last to not override combos
+    if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
+       if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
+       if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
+    }
   };
 
   const handleArrow = (e, id, direction) => {
@@ -263,14 +343,7 @@ export default function App() {
             id={`input-${node.id}`}
             value={node.text}
             onChange={(e) => handleUpdateText(node.id, e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleEnter(e, node.id);
-              if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
-              if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
-              if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
-              if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
-              if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
-            }}
+            onKeyDown={(e) => handleKeyDown(e, node)}
             style={styles.input} autoComplete="off"
           />
         </div>
@@ -310,15 +383,14 @@ export default function App() {
           <button style={styles.closeBtn} onClick={() => setShowHelp(false)}>×</button>
         </div>
         <div style={styles.shortcutList}>
-          <div style={styles.shortcutItem}><span>Enter</span> <span>New Item</span></div>
-          <div style={styles.shortcutItem}><span>Tab</span> <span>Indent</span></div>
-          <div style={styles.shortcutItem}><span>Shift + Tab</span> <span>Unindent</span></div>
-          <div style={styles.shortcutItem}><span>Backspace</span> <span>Delete Empty Item</span></div>
-          <div style={styles.shortcutItem}><span>Arrow Up/Down</span> <span>Navigate</span></div>
-          <div style={styles.shortcutItem}><span>Click •</span> <span>Zoom In</span></div>
-          <div style={styles.shortcutItem}><span>Click ▼</span> <span>Toggle Collapse</span></div>
-          <div style={styles.shortcutItem}><span>Drag •</span> <span>Reorder</span></div>
-          <div style={styles.shortcutItem}><span>?</span> <span>Toggle this menu</span></div>
+          <div style={styles.shortcutItem}><span>Alt + ?</span> <span>Toggle Help</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Right</span> <span>Zoom In</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Left</span> <span>Zoom Out</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Down</span> <span>Expand</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Up</span> <span>Collapse</span></div>
+          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
+          <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
+          <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
         </div>
       </div>
     </div>
@@ -331,23 +403,16 @@ export default function App() {
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <h1 style={styles.header}>My Notes</h1>
-        <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (?)</button>
+        <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (Alt + ?)</button>
       </div>
       
       {renderBreadcrumbs()}
       
       <div style={styles.editor}>
         {viewRootId !== 'root' && <h2 style={styles.zoomedTitle}>{currentViewNode.text}</h2>}
-        
-        {/* Render Children */}
         {currentViewNode.children.map(child => renderNode(child))}
-        
-        {/* Empty State / Add Area */}
         {currentViewNode.children.length === 0 && (
-           <div 
-             style={styles.emptyState} 
-             onClick={handleAddFirstChild}
-           >
+           <div style={styles.emptyState} onClick={handleAddFirstChild}>
              <em>Empty. Click here or press Enter to add items.</em>
            </div>
         )}
@@ -375,11 +440,8 @@ const styles = {
   bullet: { cursor: 'move', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', userSelect: 'none', fontSize: '20px', lineHeight: '1' },
   input: { border: 'none', outline: 'none', fontSize: '16px', width: '100%', padding: '4px', background: 'transparent' },
   childrenBorder: { borderLeft: '1px solid #eee', marginLeft: '29px' },
-  
-  // Updated Empty State to look clickable
   emptyState: { padding: '20px', color: '#aaa', cursor: 'pointer', userSelect: 'none' },
   
-  // Modal Styles
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
   modalContent: { background: '#fff', padding: '30px', borderRadius: '8px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
