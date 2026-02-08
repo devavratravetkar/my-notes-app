@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-39';
+const STORAGE_KEY = 'workflowy-clone-v13-40';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,14 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.39 (Safe Harbor)', collapsed: false, children: [] },
-      { id: '2', text: 'We have rolled back to the v13.34 architecture.', collapsed: false, children: [] },
-      { id: '3', text: 'This version includes:', collapsed: false, children: [
-         { id: '3-1', text: 'Auto-repair for duplicate IDs (fixes blank screen on load).', collapsed: false, children: [] },
-         { id: '3-2', text: 'CSS-based resizing (fixes layout thrashing without complex JS).', collapsed: false, children: [] },
-         { id: '3-3', text: 'Cleaned up variable names (fixes Netlify build errors).', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.40 (Tab Key Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "ReferenceError" that caused the blank screen on indent.', collapsed: false, children: [] },
+      { id: '3', text: 'Try it now:', collapsed: false, children: [
+         { id: '3-1', text: 'Click this node and press TAB.', collapsed: false, children: [] },
+         { id: '3-2', text: 'It should indent smoothly without crashing.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Your data is safe. All shortcuts work.', collapsed: false, children: [] }
+      { id: '4', text: 'Stability (Sanitization) and Performance (CSS Grid) are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -25,7 +24,7 @@ const DEFAULT_STATE = {
   darkMode: false
 };
 
-// --- DATA SANITIZATION (Prevents Blank Screen from Duplicate IDs) ---
+// --- DATA SANITIZATION ---
 const sanitizeTree = (node, seenIds = new Set()) => {
   if (!node.id || seenIds.has(node.id)) {
     node.id = GENERATE_ID(); 
@@ -106,7 +105,6 @@ export default function App() {
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
       
-      // Sanitize immediately on load to fix data corruption
       const cleanTree = parsed.tree ? sanitizeTree(parsed.tree) : DEFAULT_STATE.tree;
       
       return { ...DEFAULT_STATE, ...parsed, tree: cleanTree };
@@ -312,7 +310,6 @@ export default function App() {
              }
              cursorGoalRef.current = null;
            }
-           // Smart scroll logic
            const rect = el.getBoundingClientRect();
            const isVisible = (
              rect.top >= 0 &&
@@ -332,18 +329,8 @@ export default function App() {
   // --- Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
-    
-    // Ensure View Root Exists
     const viewResult = findNodeAndParent(cleanTree, viewRootId);
     if (!viewResult) setViewRootId('root');
-
-    // Ensure Focus Exists
-    const focusResult = findNodeAndParent(cleanTree, focusId || 'non-existent');
-    if (!focusResult && viewResult && viewResult.node.children && viewResult.node.children.length > 0) {
-        // Fallback to first child if focus lost
-        // setFocusId(viewResult.node.children[0].id);
-    }
-
     setTree(cleanTree);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
@@ -366,18 +353,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
-  };
-
   const handleUpdateText = (id, newText) => {
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -623,8 +598,6 @@ export default function App() {
     e.preventDefault();
     const el = e.target;
     const cursor = el.selectionStart || 0;
-    
-    // SKIP BLUR FOR ALL ENTERS to allow correct node focus
     skipBlurRef.current = true;
 
     setTree(prev => {
@@ -761,13 +734,13 @@ export default function App() {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
         if (!result || !result.parent) return prev;
-        const { parent } = result;
+        const { node, parent } = result; // FIXED: Added 'node' to destructuring
         const index = parent.children.findIndex(c => c.id === id);
         if (index === 0) return prev;
         const prevSibling = parent.children[index - 1];
         parent.children.splice(index, 1);
         if(!prevSibling.children) prevSibling.children = [];
-        prevSibling.children.push(nodeToMove);
+        prevSibling.children.push(node); // FIXED: Using defined 'node' variable
         prevSibling.collapsed = false; 
         setTimeout(() => {
             setFocusId(id);
@@ -1007,7 +980,7 @@ export default function App() {
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
-      whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word'
+      whiteSpace: 'pre-wrap', overflowWrap: 'break-word'
     };
 
     return (
