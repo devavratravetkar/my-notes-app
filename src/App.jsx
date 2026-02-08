@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-14';
+const STORAGE_KEY = 'workflowy-clone-v13-15';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.14 (Home Shortcut)', collapsed: false, children: [] },
-      { id: '2', text: 'Zoom into this node by clicking the bullet.', collapsed: false, children: [
-         { id: '2-1', text: 'Now you are deep inside.', collapsed: false, children: [] },
-         { id: '2-2', text: 'Press Alt + H to jump straight back to Home.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.15 (Context-Aware Backspace)', collapsed: false, children: [] },
+      { id: '2', text: 'This parent node is expanded.', collapsed: false, children: [
+         { id: '2-1', text: 'Child 1', collapsed: false, children: [] },
+         { id: '2-2', text: 'Child 2', collapsed: false, children: [] }
       ]},
-      { id: '3', text: 'All previous features (Split, Merge, Cleanup) are preserved.', collapsed: false, children: [] },
+      { id: '3', text: 'Go to the start of this line and hit Backspace.', collapsed: false, children: [] },
+      { id: '4', text: 'Notice it moves INTO the list above (becoming Child 3), instead of merging with the "Parent" text.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -434,13 +435,11 @@ export default function App() {
 
   const handleGoHome = () => {
     setViewRootId('root');
-    // Set focus to first child of root if exists
     const result = findNodeAndParent(tree, 'root');
     if (result && result.node && result.node.children && result.node.children.length > 0) {
         setFocusId(result.node.children[0].id);
         cursorGoalRef.current = 'start';
     } else {
-        // Fallback for empty root
         setFocusId('root'); 
     }
     setFocusTrigger(t => t + 1);
@@ -494,7 +493,6 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  // --- CONTEXT-AWARE SPLIT ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
@@ -512,7 +510,6 @@ export default function App() {
     const parentInNewTree = resultInNewTree.parent;
     const nodeInNewTree = resultInNewTree.node;
 
-    // Check if we should split INTO a child (Hierarchy Aware)
     const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
     if (cursor === 0) {
@@ -526,11 +523,9 @@ export default function App() {
     } else if (shouldSplitIntoChild) {
         const textBefore = text.slice(0, cursor);
         const textAfter = text.slice(cursor);
-        
         nodeInNewTree.text = textBefore;
         const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
         nodeInNewTree.children.unshift(newNode);
-        
         setTree(newTree);
         setFocusId(newNode.id);
         cursorGoalRef.current = 'start';
@@ -538,11 +533,9 @@ export default function App() {
     } else {
         const textBefore = text.slice(0, cursor);
         const textAfter = text.slice(cursor);
-        
         nodeInNewTree.text = textBefore;
         const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
         parentInNewTree.children.splice(index + 1, 0, newNode);
-        
         setTree(newTree);
         setFocusId(newNode.id);
         cursorGoalRef.current = 'start';
@@ -550,6 +543,7 @@ export default function App() {
     }
   };
 
+  // --- CONTEXT-AWARE BACKSPACE (MERGE OR MOVE) ---
   const handleBackspace = (e, id, text) => {
     const el = e.target;
     if (el.selectionStart > 0) return;
@@ -560,6 +554,7 @@ export default function App() {
     if (!result || !result.parent) return;
     const { node, parent } = result;
     
+    // Safety check for children inside current node (standard merge blocker or custom handling)
     if (node.children && node.children.length > 0) {
        const index = parent.children.findIndex(c => c.id === id);
        if (index > 0) {
@@ -577,9 +572,23 @@ export default function App() {
     
     if (index > 0) {
       const prevSibling = parent.children[index - 1];
+      
+      // HIERARCHY CHECK: Does previous sibling have expanded children?
+      // If yes, MOVE this node to be the LAST child of that sibling.
+      if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
+          parent.children.splice(index, 1); // Remove from current position
+          prevSibling.children.push(node); // Add to end of previous sibling's children
+          
+          setTree(newTree);
+          setFocusId(node.id);
+          cursorGoalRef.current = 'start'; // Keep cursor at start
+          setFocusTrigger(t => t + 1);
+          return;
+      }
+
+      // STANDARD MERGE (No expanded children above)
       let cursorTarget = prevSibling.text.length; 
       
-      // Smart Space Merge
       if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
           prevSibling.text += " ";
           cursorTarget += 1;
@@ -883,7 +892,7 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el) adjustHeight(el); }}
+              ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
@@ -1033,7 +1042,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge)</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge/Move)</span></div>
               </div>
             </div>
           </div>
