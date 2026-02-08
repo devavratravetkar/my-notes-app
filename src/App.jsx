@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-1';
+const STORAGE_KEY = 'workflowy-clone-v13-2';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.1 (Fixed Visibility)', collapsed: false, children: [] },
-      { id: '2', text: 'Search for "Visual" to see the fix.', collapsed: false, children: [] },
-      { id: '3', text: 'The text is now fully visible during search.', collapsed: false, children: [
-         { id: '3-1', text: 'Visual: Highlights are behind the text.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Normal text is visible too.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.2 (Safety Lock Restored)', collapsed: false, children: [] },
+      { id: '2', text: 'Try emptying the parent node below (delete "Parent"), then click away.', collapsed: false, children: [] },
+      { id: '3', text: 'Parent', collapsed: false, children: [
+         { id: '3-1', text: 'I am a child node.', collapsed: false, children: [] },
+         { id: '3-2', text: 'If you empty my parent, it becomes "..." to save me.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Navigation (Up/Down) works perfectly again.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -125,7 +124,7 @@ export default function App() {
 
   const adjustHeight = (el) => {
     if (!el) return;
-    el.style.height = 'auto'; // Reset to calculate new height
+    el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
   };
 
@@ -206,7 +205,6 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') adjustHeight(el);
-           // We do NOT set selectionRange here to allow native click placement
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -222,13 +220,19 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization ---
+  // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
+    
+    // SAFETY FIX 1: Do not prune nodes that have children, even if text is empty
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
-        const keep = (child.text && child.text.trim() !== '') || (child.id === focusId);
+        const hasText = child.text && child.text.trim() !== '';
+        const isFocused = child.id === focusId;
+        const hasChildren = child.children && child.children.length > 0; // CRITICAL: Keep parents!
+        const keep = hasText || isFocused || hasChildren;
+        
         if (keep) pruneEmpty(child);
         return keep;
       });
@@ -281,7 +285,7 @@ export default function App() {
           part.toLowerCase() === query.toLowerCase() ? (
             <span key={i} style={{ backgroundColor: theme.textHighlightBg, color: theme.textHighlightFg, fontWeight: 'bold' }}>{part}</span>
           ) : (
-            part // This was correctly rendering, but the container was transparent
+            part
           )
         )}
       </span>
@@ -289,29 +293,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const isDescendant = (tree, sourceId, targetId) => {
-    const sourceResult = findNodeAndParent(tree, sourceId);
-    if (!sourceResult) return false;
-    const { node: sourceNode } = sourceResult;
-    const findInSubtree = (n) => {
-      if (n.id === targetId) return true;
-      return n.children && n.children.some(findInSubtree);
-    };
-    return sourceNode.children && sourceNode.children.some(findInSubtree);
-  };
-
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
-  };
-
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -321,11 +302,13 @@ export default function App() {
     }
   };
 
+  // SAFETY FIX 2: On Blur, if node is empty but has children, set text to "..."
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (result && result.node) {
-      if (result.node.text.trim() === '' && result.node.children && result.node.children.length > 0) {
+      const hasChildren = result.node.children && result.node.children.length > 0;
+      if (result.node.text.trim() === '' && hasChildren) {
         result.node.text = "...";
         setTree(newTree);
       }
@@ -392,6 +375,7 @@ export default function App() {
         const focusResult = findNodeAndParent(newTree, focusId);
         if (focusResult && focusResult.node && focusResult.parent) {
            const { node, parent } = focusResult;
+           // Only delete if NO children
            if (node.text.trim() === '' && (!node.children || node.children.length === 0)) {
                const index = parent.children.findIndex(c => c.id === focusId);
                if (index !== -1) {
@@ -479,11 +463,14 @@ export default function App() {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
+    
+    // SAFETY FIX 3: Check for children before deleting on backspace
     if (result.node.children && result.node.children.length > 0) {
       result.node.text = "..."; 
       setTree(newTree);
       return; 
     }
+
     const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
@@ -582,11 +569,9 @@ export default function App() {
   };
 
   const handleArrow = (e, id, direction) => {
-    // SMART NAVIGATION: Only navigate if at text boundary
     const el = e.target;
     if (el) {
       const { selectionStart, value } = el;
-      // Allow native movement inside text
       if (direction === 'up' && selectionStart > 0) return; 
       if (direction === 'down' && selectionStart < value.length) return; 
     }
@@ -639,7 +624,6 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Standard Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -773,18 +757,18 @@ export default function App() {
           </div>
           
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
-            {/* Layer 1: Highlight Overlay (Behind) - FIXED: Color is now visible */}
+            {/* Layer 1: Highlight Overlay */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
                visibility: searchQuery ? 'visible' : 'hidden',
                pointerEvents: 'none', 
-               color: theme.fg // FIXED: Non-matching text is now visible
+               color: theme.fg 
             }}>
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
 
-            {/* Layer 2: Interactive Textarea (Front) */}
+            {/* Layer 2: Interactive Textarea */}
             <textarea
               ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
@@ -792,15 +776,17 @@ export default function App() {
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
               onFocus={() => { setFocusId(node.id); }}
+              // Restore blur handler with safety check
+              onBlur={() => handleBlur(node.id)}
               rows={1}
               style={{
                 ...commonTextStyle,
                 gridArea: '1 / 1',
                 border: 'none', outline: 'none', background: 'transparent', 
                 resize: 'none', overflow: 'hidden',
-                color: searchQuery ? 'transparent' : theme.fg, // Transparent text if searching
-                caretColor: theme.fg, // Cursor always visible
-                zIndex: 1 // Ensure clicks hit this layer
+                color: searchQuery ? 'transparent' : theme.fg, 
+                caretColor: theme.fg, 
+                zIndex: 1 
               }} 
             />
           </div>
