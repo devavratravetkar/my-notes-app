@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-3';
+const STORAGE_KEY = 'workflowy-clone-v13-4';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.3 (Navigation Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Mouse clicks work perfectly (cursor lands where you click).', collapsed: false, children: [] },
-      { id: '3', text: 'Keyboard Navigation works perfectly (Up goes to end of previous line, Down goes to start of next).', collapsed: false, children: [
-         { id: '3-1', text: 'Try navigating up and down this list.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Try deleting this text to see the "..." safety lock.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.4 (Navigation Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Arrow Up now reliably jumps to the previous node when at the start of a line.', collapsed: false, children: [] },
+      { id: '3', text: 'Arrow Down jumps to the next node when at the end.', collapsed: false, children: [
+         { id: '3-1', text: 'Test it on these nested items.', collapsed: false, children: [] },
+         { id: '3-2', text: 'It should feel fluid and native.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -65,9 +65,6 @@ export default function App() {
 
   const searchInputRef = useRef(null);
   const lastFocusRef = useRef(null);
-  
-  // NEW: Tracks where the cursor should land after a focus switch. 
-  // Values: 'start', 'end', or null (for mouse clicks)
   const cursorGoalRef = useRef(null);
 
   // --- Persistence ---
@@ -173,8 +170,8 @@ export default function App() {
     if (searchInputRef.current) searchInputRef.current.blur();
     
     const dest = targetId || lastFocusRef.current || viewRootId;
-    cursorGoalRef.current = 'end'; // Default to end of line when jumping back
     setFocusId(dest);
+    cursorGoalRef.current = 'end';
     setFocusTrigger(t => t + 1);
   };
 
@@ -202,24 +199,24 @@ export default function App() {
     }
   };
 
-  // --- Focus Management (The Core Fix) ---
+  // --- Focus Management ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
+      // Small timeout allows DOM to update before we grab focus
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
              adjustHeight(el);
-             // CRITICAL FIX: Only force cursor position if a goal was set by keyboard.
-             // Otherwise (mouse click), leave it alone.
+             // Apply cursor goal if set by keyboard navigation
              if (cursorGoalRef.current === 'start') {
                el.setSelectionRange(0, 0);
              } else if (cursorGoalRef.current === 'end') {
                const len = el.value.length;
                el.setSelectionRange(len, len);
              }
-             // Reset goal
+             // Clear goal so mouse clicks work normally
              cursorGoalRef.current = null;
            }
            
@@ -238,7 +235,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization & Safety ---
+  // --- Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -308,6 +305,18 @@ export default function App() {
   };
 
   // --- Handlers ---
+  const getFlatList = (rootNode) => {
+    const list = [];
+    const traverse = (node) => {
+      if (node.id !== rootNode.id) list.push(node);
+      if (!node.collapsed && node.children) {
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(rootNode);
+    return list;
+  };
+
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -481,13 +490,11 @@ export default function App() {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
-    
     if (result.node.children && result.node.children.length > 0) {
       result.node.text = "..."; 
       setTree(newTree);
       return; 
     }
-
     const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
@@ -584,16 +591,17 @@ export default function App() {
     }
     setTree(newTree);
     setFocusId(id);
-    // Move node keeps cursor same place, no need to force start/end
     setFocusTrigger(t => t + 1);
   };
 
   const handleArrow = (e, id, direction) => {
-    const el = e.target;
+    // Robust check: use currentTarget to guarantee we're checking the textarea
+    const el = e.currentTarget; 
     if (el) {
       const { selectionStart, value } = el;
-      if (direction === 'up' && selectionStart > 0) return; 
-      if (direction === 'down' && selectionStart < value.length) return; 
+      // Allow moving cursor inside text if we are NOT at the boundary
+      if (direction === 'up' && selectionStart > 0) return;
+      if (direction === 'down' && selectionStart < value.length) return;
     }
 
     e.preventDefault();
@@ -602,10 +610,11 @@ export default function App() {
     const { node: viewRoot } = result;
     const flatList = getFlatList(viewRoot);
     const currentIndex = flatList.findIndex(n => n.id === id);
+    
     if (direction === 'up') {
       if (currentIndex > 0) {
         setFocusId(flatList[currentIndex - 1].id);
-        cursorGoalRef.current = 'end'; // Up -> End of previous
+        cursorGoalRef.current = 'end'; // When going up, land at end of previous line
       } else if (viewRootId !== 'root') {
         setFocusId(viewRootId);
         cursorGoalRef.current = 'end';
@@ -613,7 +622,7 @@ export default function App() {
     } else if (direction === 'down') {
       if (currentIndex < flatList.length - 1) {
         setFocusId(flatList[currentIndex + 1].id);
-        cursorGoalRef.current = 'start'; // Down -> Start of next
+        cursorGoalRef.current = 'start'; // When going down, land at start of next line
       }
     }
     setFocusTrigger(t => t + 1);
@@ -648,6 +657,7 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
+    // Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -775,7 +785,7 @@ export default function App() {
                  cursor: 'move', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', 
                  color: theme.dim, userSelect: 'none', fontSize: '20px', lineHeight: '1'
                }}
-               onClick={() => { setViewRootId(node.id); setFocusId(node.id); cursorGoalRef.current = null; }}
+               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
                draggable onDragStart={(e) => handleDragStart(e, node.id)}
                onDragEnd={handleDragEnd} onDragOver={(e) => e.preventDefault()}
                onDrop={(e) => handleDrop(e, node.id)}
