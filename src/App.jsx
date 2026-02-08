@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v10-1';
+const STORAGE_KEY = 'workflowy-clone-v10-2';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Fixed: Shortcuts no longer conflict!', collapsed: false, children: [] },
-      { id: '2', text: 'Top Right: Single "Expand/Collapse" toggle button.', collapsed: false, children: [] },
-      { id: '3', text: 'Try Ctrl+Shift+Up/Down (Clean expand/collapse without moving items).', collapsed: false, children: [
-         { id: '3-1', text: 'Hidden item 1', collapsed: false, children: [] },
-         { id: '3-2', text: 'Hidden item 2', collapsed: false, children: [] }
+      { id: '1', text: 'Fixed: Focus is preserved after Global Expand/Collapse!', collapsed: false, children: [] },
+      { id: '2', text: 'If you Collapse All while deep in a list, focus jumps to the Header.', collapsed: false, children: [] },
+      { id: '3', text: 'Try it: Indent this, focus it, then Ctrl+Shift+Up.', collapsed: false, children: [
+         { id: '3-1', text: 'Focus me, then Collapse All.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -46,7 +45,6 @@ export default function App() {
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
   
-  // Toggle State for the Header Button
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   // --- Persistence ---
@@ -117,7 +115,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // --- Focus Effect ---
+  // --- Focus Management (FIXED) ---
   useEffect(() => {
     if (focusId) {
       setTimeout(() => {
@@ -130,6 +128,10 @@ export default function App() {
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
+        } else {
+           // Fallback: If the focused element is gone (e.g. collapsed hidden), focus the Header
+           const headerEl = document.getElementById(`input-${viewRootId}`);
+           if (headerEl) headerEl.focus();
         }
       }, 50);
     }
@@ -199,7 +201,7 @@ export default function App() {
     }
   };
 
-  // --- GLOBAL EXPAND / COLLAPSE ---
+  // --- GLOBAL EXPAND / COLLAPSE (FIXED) ---
   const handleExpandAll = () => {
     const newTree = cloneTree(tree);
     const traverse = (node) => {
@@ -210,7 +212,8 @@ export default function App() {
     };
     traverse(newTree);
     setTree(newTree);
-    setIsAllExpanded(true); // Sync state
+    setIsAllExpanded(true);
+    setFocusTrigger(t => t + 1); // Force Refocus
   };
 
   const handleCollapseAll = () => {
@@ -222,9 +225,10 @@ export default function App() {
       }
     };
     traverse(newTree);
-    newTree.collapsed = false; // Root always expanded
+    newTree.collapsed = false; 
     setTree(newTree);
-    setIsAllExpanded(false); // Sync state
+    setIsAllExpanded(false);
+    setFocusTrigger(t => t + 1); // Force Refocus
   };
 
   const toggleGlobalState = () => {
@@ -493,8 +497,6 @@ export default function App() {
        setCollapseState(node.id, true); 
     }
     
-    // FIX: Ensure Ctrl is NOT pressed when triggering Shift+Up/Down (Move Node)
-    // This prevents conflict with Global Expand/Collapse (Ctrl+Shift+Down)
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
