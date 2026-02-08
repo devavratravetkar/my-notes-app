@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-6';
+const STORAGE_KEY = 'workflowy-clone-v13-7';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,10 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.6 (Whitespace Sanitizer)', collapsed: false, children: [] },
-      { id: '2', text: 'Try hitting Shift+Enter multiple times at the end of this line, then click away.', collapsed: false, children: [] },
-      { id: '3', text: 'The app now automatically trims "meaningless" trailing whitespace on blur.', collapsed: false, children: [
-         { id: '3-1', text: 'It also collapses huge internal gaps (3+ lines) down to just one blank line.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.7 (Self-Cleaning Lists)', collapsed: false, children: [] },
+      { id: '2', text: 'Try hitting Enter multiple times at the bottom.', collapsed: false, children: [] },
+      { id: '3', text: 'Notice that it does NOT leave a trail of empty bullets behind. As you leave an empty node, it cleans itself up.', collapsed: false, children: [
+         { id: '3-1', text: 'However, Enter at the start of a line (to push text down) still works perfectly.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -215,7 +215,6 @@ export default function App() {
              }
              cursorGoalRef.current = null;
            }
-           
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -231,7 +230,7 @@ export default function App() {
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
-  // --- Initialization & Safety ---
+  // --- Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
     const pruneEmpty = (node) => {
@@ -322,26 +321,27 @@ export default function App() {
     }
   };
 
-  // --- IMPROVED BLUR HANDLER (Sanitizer) ---
+  // --- CLEANUP ON BLUR ---
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (result && result.node) {
       let text = result.node.text;
-      
-      // 1. Trim trailing/leading whitespace
       text = text.trim();
-      
-      // 2. Collapse excessive internal newlines (3+ becomes 2)
-      // This allows max 1 blank line between paragraphs
       text = text.replace(/\n{3,}/g, '\n\n');
-      
       result.node.text = text;
 
-      // 3. Safety Lock for empty parents
       const hasChildren = result.node.children && result.node.children.length > 0;
-      if (text === '' && hasChildren) {
-        result.node.text = "...";
+      
+      // AUTO-DELETE: If empty and no children, delete node.
+      if (text === '' && !hasChildren && result.parent) {
+         // Do not delete if it is the only node in the entire view? 
+         // Optional, but usually good to keep at least one node.
+         // For now, let's allow deleting, the app handles empty state well.
+         const idx = result.parent.children.findIndex(c => c.id === id);
+         if (idx !== -1) {
+             result.parent.children.splice(idx, 1);
+         }
       }
       
       setTree(newTree);
@@ -474,12 +474,13 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
+  // --- SMART SPLIT & INSERT ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
     if (!currentResult || !currentResult.node) return;
     
-    // Check if node is empty -> Shift+Tab functionality
+    // Empty Node -> Shift+Tab
     if (currentResult.node.text === '') {
        handleShiftTab(e, id);
        return;
@@ -491,24 +492,36 @@ export default function App() {
     const cursor = el.selectionStart || 0;
     const text = node.text || '';
     
-    // SPLIT LOGIC
-    const textBefore = text.slice(0, cursor);
-    const textAfter = text.slice(cursor);
-
     const newTree = cloneTree(tree);
     const resultInNewTree = findNodeAndParent(newTree, id);
     const parentInNewTree = resultInNewTree.parent;
     const nodeInNewTree = resultInNewTree.node;
 
-    nodeInNewTree.text = textBefore;
+    if (cursor === 0) {
+        // ENTER AT START: Insert Empty Node ABOVE
+        // We do this to avoid the empty node blurring and deleting itself immediately.
+        // By inserting before, we keep focus on the CURRENT node (with text), 
+        // so the new empty node above is passive and won't trigger delete-on-blur until visited.
+        const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+        parentInNewTree.children.splice(index, 0, newNode);
+        
+        // Keep focus on current node, but update tree
+        setTree(newTree);
+        // cursor remains 0, text remains same
+    } else {
+        // ENTER MIDDLE/END: Split and Move Focus Down
+        const textBefore = text.slice(0, cursor);
+        const textAfter = text.slice(cursor);
 
-    const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
-    parentInNewTree.children.splice(index + 1, 0, newNode);
+        nodeInNewTree.text = textBefore;
+        const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
+        parentInNewTree.children.splice(index + 1, 0, newNode);
 
-    setTree(newTree);
-    setFocusId(newNode.id);
-    cursorGoalRef.current = 'start';
-    setFocusTrigger(t => t + 1);
+        setTree(newTree);
+        setFocusId(newNode.id);
+        cursorGoalRef.current = 'start';
+        setFocusTrigger(t => t + 1);
+    }
   };
 
   const handleBackspace = (e, id, text) => {
