@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-12';
+const STORAGE_KEY = 'workflowy-clone-v13-13';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.12 (Smart Merge & Cleanup)', collapsed: false, children: [] },
-      { id: '2', text: 'Try hitting Backspace at the start of this line.', collapsed: false, children: [] },
-      { id: '3', text: 'It will merge with the line above, adding a single space automatically.', collapsed: false, children: [
-         { id: '3-1', text: 'Now try hitting Enter at the start of a line to push text down.', collapsed: false, children: [] },
-         { id: '3-2', text: 'If you click away immediately, the empty gap will be cleaned up automatically.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.13 (Context-Aware Split)', collapsed: false, children: [] },
+      { id: '2', text: 'This node has children and is expanded. Place cursor here | and hit Enter.', collapsed: false, children: [
+         { id: '2-1', text: 'The text after the cursor will drop HERE (as the first child).', collapsed: false, children: [] },
+         { id: '2-2', text: 'Instead of jumping way down below this list.', collapsed: false, children: [] }
       ]},
+      { id: '3', text: 'Standard flat nodes still split to siblings normally.', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -324,7 +324,6 @@ export default function App() {
     }
   };
 
-  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -336,16 +335,13 @@ export default function App() {
 
       const hasChildren = result.node.children && result.node.children.length > 0;
       
-      // 1. Check CURRENT node: If empty and no children, delete it.
+      // Auto-cleanup current and previous empty nodes
       if (text === '' && !hasChildren && result.parent) {
          const idx = result.parent.children.findIndex(c => c.id === id);
          if (idx !== -1) {
              result.parent.children.splice(idx, 1);
          }
-      } 
-      // 2. Check PREVIOUS node (The "Ghost Node" Fix): 
-      // If the node ABOVE is empty/childless, it was likely an abandoned spacer. Delete it.
-      else if (result.parent) {
+      } else if (result.parent) {
          const idx = result.parent.children.findIndex(c => c.id === id);
          if (idx > 0) {
              const prevNode = result.parent.children[idx - 1];
@@ -485,6 +481,7 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
+  // --- CONTEXT-AWARE SPLIT ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
@@ -502,7 +499,12 @@ export default function App() {
     const parentInNewTree = resultInNewTree.parent;
     const nodeInNewTree = resultInNewTree.node;
 
+    // Check if we should split INTO a child (Hierarchy Aware)
+    // Condition: Cursor > 0, Node has children, Node is Expanded
+    const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
+
     if (cursor === 0) {
+        // ENTER AT START -> Insert Sibling Above
         if (index > 0) {
             const prevNode = parentInNewTree.children[index - 1];
             if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return;
@@ -510,12 +512,28 @@ export default function App() {
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         parentInNewTree.children.splice(index, 0, newNode);
         setTree(newTree);
-    } else {
+    } else if (shouldSplitIntoChild) {
+        // ENTER MIDDLE/END (EXPANDED) -> Split into First Child
         const textBefore = text.slice(0, cursor);
         const textAfter = text.slice(cursor);
+        
         nodeInNewTree.text = textBefore;
         const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
-        parentInNewTree.children.splice(index + 1, 0, newNode);
+        nodeInNewTree.children.unshift(newNode); // Add as first child
+        
+        setTree(newTree);
+        setFocusId(newNode.id);
+        cursorGoalRef.current = 'start';
+        setFocusTrigger(t => t + 1);
+    } else {
+        // ENTER MIDDLE/END (FLAT/COLLAPSED) -> Split into Next Sibling
+        const textBefore = text.slice(0, cursor);
+        const textAfter = text.slice(cursor);
+        
+        nodeInNewTree.text = textBefore;
+        const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
+        parentInNewTree.children.splice(index + 1, 0, newNode); // Add as next sibling
+        
         setTree(newTree);
         setFocusId(newNode.id);
         cursorGoalRef.current = 'start';
@@ -550,14 +568,12 @@ export default function App() {
     
     if (index > 0) {
       const prevSibling = parent.children[index - 1];
-      let cursorTarget = prevSibling.text.length; // Default join point
+      let cursorTarget = prevSibling.text.length; 
       
-      // SMART SPACE MERGE
-      // Add space if previous doesn't end with one, and current doesn't start with one
-      // And both parts are non-empty
+      // Smart Space Merge
       if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
           prevSibling.text += " ";
-          cursorTarget += 1; // Move cursor after the inserted space
+          cursorTarget += 1;
       }
       
       prevSibling.text += node.text;
@@ -565,7 +581,7 @@ export default function App() {
       
       setTree(newTree);
       setFocusId(prevSibling.id);
-      cursorGoalRef.current = cursorTarget; // Set cursor exactly after space
+      cursorGoalRef.current = cursorTarget; // Cursor after space
       setFocusTrigger(t => t + 1);
     } else {
       if (parent.id !== viewRootId) {
