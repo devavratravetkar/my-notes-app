@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-23';
+const STORAGE_KEY = 'workflowy-clone-v13-24';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,14 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.23 (Visual Snap Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Test 1: Add Shift+Enter newlines here.\n\n\n', collapsed: false, children: [] },
-      { id: '3', text: 'Test 2: Arrow Down.', collapsed: false, children: [
-         { id: '3-1', text: 'The node above snaps shut VISUALLY instantly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.24 (Focus Rescue)', collapsed: false, children: [] },
+      { id: '2', text: 'Test Scenario:', collapsed: false, children: [
+         { id: '2-1', text: 'Expand this list completely.', collapsed: false, children: [
+             { id: '2-1-1', text: 'Place your cursor HERE.', collapsed: false, children: [] }
+         ]}
       ]},
-      { id: '4', text: 'We enabled auto-height for ALL nodes (not just focused ones) to catch these background updates.', collapsed: false, children: [] }
+      { id: '3', text: 'Now click "Collapse All" (or press Alt+Shift+Up).', collapsed: false, children: [] },
+      { id: '4', text: 'The cursor will jump safely to "Test Scenario" instead of disappearing.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -120,6 +122,18 @@ export default function App() {
     for (const child of root.children || []) {
       const result = findNodeAndParent(child, targetId, root);
       if (result) return result;
+    }
+    return null;
+  };
+
+  // Helper to find full path to a node (for focus rescue)
+  const findPath = (root, targetId) => {
+    if (root.id === targetId) return [root];
+    if (root.children) {
+        for (const child of root.children) {
+            const path = findPath(child, targetId);
+            if (path) return [root, ...path];
+        }
     }
     return null;
   };
@@ -327,7 +341,6 @@ export default function App() {
     });
   };
 
-  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
@@ -337,27 +350,19 @@ export default function App() {
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
-        
         if (!result || !result.node) return prev;
 
         if (result && result.node) {
             let text = result.node.text;
-            // Trim whitespace
             text = text.trim();
             text = text.replace(/\n{3,}/g, '\n\n');
             result.node.text = text;
 
             const hasChildren = result.node.children && result.node.children.length > 0;
-            
-            // Delete CURRENT if empty & childless
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
-                if (idx !== -1) {
-                    result.parent.children.splice(idx, 1);
-                }
-            } 
-            // Delete PREVIOUS if empty & childless (Spacer Cleanup)
-            else if (result.parent) {
+                if (idx !== -1) result.parent.children.splice(idx, 1);
+            } else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
                     const prevNode = result.parent.children[idx - 1];
@@ -373,6 +378,17 @@ export default function App() {
 
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
+    
+    // FOCUS RESCUE: Check if we are hiding the focused node
+    let rescueFocusId = null;
+    if (focusId) {
+        const path = findPath(tree, focusId);
+        // If the path contains the node being collapsed (id), and it's not the focused node itself
+        if (path && path.some(n => n.id === id) && id !== focusId) {
+            rescueFocusId = id; // Set focus to the parent being collapsed
+        }
+    }
+
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -381,9 +397,24 @@ export default function App() {
         }
         return newTree;
     });
+
+    if (rescueFocusId) {
+        setFocusId(rescueFocusId);
+        cursorGoalRef.current = 'start';
+        setFocusTrigger(t => t + 1);
+    }
   };
   
   const setCollapseState = (id, shouldCollapse) => {
+    // FOCUS RESCUE for Alt+Up/Down
+    let rescueFocusId = null;
+    if (shouldCollapse && focusId) {
+        const path = findPath(tree, focusId);
+        if (path && path.some(n => n.id === id) && id !== focusId) {
+            rescueFocusId = id;
+        }
+    }
+
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
@@ -392,6 +423,12 @@ export default function App() {
         }
         return newTree;
     });
+
+    if (rescueFocusId) {
+        setFocusId(rescueFocusId);
+        cursorGoalRef.current = 'start';
+        setFocusTrigger(t => t + 1);
+    }
   };
 
   const handleExpandAll = () => {
@@ -411,6 +448,23 @@ export default function App() {
   };
 
   const handleCollapseAll = () => {
+    // FOCUS RESCUE: "Collapse All" hides almost everything.
+    // We need to move focus to the visible ancestor (child of viewRoot)
+    let rescueFocusId = null;
+    if (focusId) {
+        const path = findPath(tree, focusId);
+        if (path) {
+            // Find the node in the path that is a direct child of viewRootId
+            // OR if viewRootId is root, a direct child of root.
+            const viewRootIndex = path.findIndex(n => n.id === viewRootId);
+            if (viewRootIndex !== -1 && viewRootIndex + 1 < path.length) {
+                rescueFocusId = path[viewRootIndex + 1].id;
+            } else if (viewRootId === 'root' && path.length > 1) {
+                rescueFocusId = path[1].id; // path[0] is root
+            }
+        }
+    }
+
     setTree(prev => {
         const newTree = cloneTree(prev);
         const traverse = (node) => {
@@ -424,6 +478,11 @@ export default function App() {
         return newTree;
     });
     setIsAllExpanded(false);
+    
+    if (rescueFocusId) {
+        setFocusId(rescueFocusId);
+        cursorGoalRef.current = 'start';
+    }
     setFocusTrigger(t => t + 1); 
   };
 
@@ -582,7 +641,7 @@ export default function App() {
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
-    skipBlurRef.current = true; // KEEP SKIP BLUR for deletes
+    skipBlurRef.current = true;
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -764,7 +823,6 @@ export default function App() {
         const newTree = cloneTree(prev);
         const res = findNodeAndParent(newTree, id);
         if(res && res.node) {
-            // Trim whitespace actively
             res.node.text = res.node.text.trim().replace(/\n{3,}/g, '\n\n');
         }
         return newTree;
@@ -972,8 +1030,7 @@ export default function App() {
             </div>
 
             <textarea
-              // FIX: Auto-adjust height ALWAYS (even if not focused) to snap shut on remote updates
-              ref={el => { if(el) adjustHeight(el); }}
+              ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
