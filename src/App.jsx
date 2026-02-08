@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-9';
+const STORAGE_KEY = 'workflowy-clone-v13-10';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.9 (Clean List Logic)', collapsed: false, children: [] },
-      { id: '2', text: 'Go to the start of this node and mash Enter 5 times.', collapsed: false, children: [] },
-      { id: '3', text: 'It will create exactly ONE empty node above, preventing a mess.', collapsed: false, children: [
-         { id: '3-1', text: 'Then hit Backspace at the start to Merge it back perfectly.', collapsed: false, children: [] }
-      ]},
+      { id: '1', text: 'Welcome to v13.10 (Rapid Merge)', collapsed: false, children: [] },
+      { id: '2', text: 'Node A', collapsed: false, children: [] },
+      { id: '3', text: 'Node B', collapsed: false, children: [] },
+      { id: '4', text: 'Node C (Try Backspacing from the start of this node)', collapsed: false, children: [] },
+      { id: '5', text: 'It will merge up, and the cursor will land at the START of the line, allowing you to hit Backspace again to keep merging.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -64,7 +64,7 @@ export default function App() {
 
   const searchInputRef = useRef(null);
   const lastFocusRef = useRef(null);
-  const cursorGoalRef = useRef(null); // Can be 'start', 'end', or a specific number index
+  const cursorGoalRef = useRef(null);
 
   // --- Persistence ---
   useEffect(() => {
@@ -207,7 +207,6 @@ export default function App() {
            el.focus();
            if (el.tagName === 'TEXTAREA') {
              adjustHeight(el);
-             // Apply specific cursor goals
              if (typeof cursorGoalRef.current === 'number') {
                 el.setSelectionRange(cursorGoalRef.current, cursorGoalRef.current);
              } else if (cursorGoalRef.current === 'start') {
@@ -334,7 +333,6 @@ export default function App() {
       result.node.text = text;
 
       const hasChildren = result.node.children && result.node.children.length > 0;
-      // Auto-delete empty nodes without children on blur
       if (text === '' && !hasChildren && result.parent) {
          const idx = result.parent.children.findIndex(c => c.id === id);
          if (idx !== -1) {
@@ -489,24 +487,14 @@ export default function App() {
     const nodeInNewTree = resultInNewTree.node;
 
     if (cursor === 0) {
-        // ENTER AT START
-        // 1. Check if previous sibling is ALREADY empty to prevent stacking
         if (index > 0) {
             const prevNode = parentInNewTree.children[index - 1];
-            // If prev node is empty (and has no children), do nothing.
-            if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) {
-                return;
-            }
+            if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return;
         }
-
-        // 2. Insert Empty Node ABOVE
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         parentInNewTree.children.splice(index, 0, newNode);
-        
         setTree(newTree);
-        // Keep focus on current node (don't move cursor)
     } else {
-        // ENTER MIDDLE/END: Split
         const textBefore = text.slice(0, cursor);
         const textAfter = text.slice(cursor);
         nodeInNewTree.text = textBefore;
@@ -521,7 +509,6 @@ export default function App() {
 
   const handleBackspace = (e, id, text) => {
     const el = e.target;
-    // Allow normal deletion if not at start
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
@@ -530,20 +517,14 @@ export default function App() {
     if (!result || !result.parent) return;
     const { node, parent } = result;
     
-    // Safety: don't delete if children exist (unless we implement sophisticated merge-children logic later)
-    // For now, if children exist, just do "..." logic or stop.
-    // User requested "join to previous", which implies merging.
     if (node.children && node.children.length > 0) {
-       // Only allow merge if previous sibling exists
        const index = parent.children.findIndex(c => c.id === id);
        if (index > 0) {
            const prevSibling = parent.children[index - 1];
            if (!prevSibling.children) prevSibling.children = [];
-           // Adopt children
            prevSibling.children = [...prevSibling.children, ...node.children];
            prevSibling.collapsed = false;
        } else {
-           // No previous sibling -> unindent with children
            handleShiftTab(e, id);
            return;
        }
@@ -552,21 +533,17 @@ export default function App() {
     const index = parent.children.findIndex(c => c.id === id);
     
     if (index > 0) {
-      // MERGE with PREVIOUS
       const prevSibling = parent.children[index - 1];
-      const cursorTarget = prevSibling.text.length; // Cursor goes to end of previous text
       
-      prevSibling.text += node.text; // Append text
-      
-      // Delete current
+      prevSibling.text += node.text;
       parent.children.splice(index, 1);
       
       setTree(newTree);
       setFocusId(prevSibling.id);
-      cursorGoalRef.current = cursorTarget; // Set exact numeric cursor position
+      // FIXED: Cursor goes to start of merged node to allow continuous backspacing
+      cursorGoalRef.current = 0; 
       setFocusTrigger(t => t + 1);
     } else {
-      // Unindent if at top
       if (parent.id !== viewRootId) {
          handleShiftTab(e, id);
       }
