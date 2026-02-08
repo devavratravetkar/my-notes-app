@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-27';
+const STORAGE_KEY = 'workflowy-clone-v13-28';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,15 +10,17 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.27 (Enter Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Place cursor at start | and hit Enter.', collapsed: false, children: [] },
-      { id: '3', text: 'It creates a new node above and focuses it perfectly.', collapsed: false, children: [
-         { id: '3-1', text: 'We prevented the cleanup script from deleting the new node instantly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.28 (Deep Linking Enabled)', collapsed: false, children: [] },
+      { id: '2', text: 'Look at your browser address bar.', collapsed: false, children: [] },
+      { id: '3', text: 'Zoom into this node.', collapsed: false, children: [
+         { id: '3-1', text: 'Notice the URL changed to match this node ID.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Now press the Browser "Back" button.', collapsed: false, children: [] },
+         { id: '3-3', text: 'It zooms you out instead of leaving the page.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Import/Export, Sanitizer, and Context-Moves are all stable.', collapsed: false, children: [] }
+      { id: '4', text: 'You can now bookmark specific lists and share deep links (if you implement a backend later).', collapsed: false, children: [] }
     ]
   },
-  viewRootId: 'root',
+  // viewRootId is managed by state init now to support deep linking on load
   focusId: null,
   darkMode: false
 };
@@ -90,6 +92,7 @@ export default function App() {
     try {
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
+      // Ensure tree structure is valid
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
       return parsed;
     } catch (e) {
@@ -99,7 +102,14 @@ export default function App() {
   });
 
   const [tree, setTree] = useState(state.tree);
-  const [viewRootId, setViewRootId] = useState(state.viewRootId || 'root');
+  
+  // -- DEEP LINKING: Initialize View from URL Hash --
+  const [viewRootId, setViewRootId] = useState(() => {
+    const hash = window.location.hash.replace('#', '');
+    // Priority: URL Hash -> Saved State -> 'root'
+    return hash || (state.viewRootId || 'root');
+  });
+
   const [focusId, setFocusId] = useState(state.focusId);
   const [darkMode, setDarkMode] = useState(state.darkMode || false);
   
@@ -127,6 +137,30 @@ export default function App() {
       darkMode
     }));
   }, [tree, viewRootId, focusId, darkMode]);
+
+  // --- DEEP LINKING EFFECTS ---
+  
+  // 1. Sync URL when viewRootId changes
+  useEffect(() => {
+    if (viewRootId) {
+        window.location.hash = viewRootId;
+    }
+  }, [viewRootId]);
+
+  // 2. Handle Browser Back/Forward Buttons
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash && hash !== viewRootId) {
+        setViewRootId(hash);
+      } else if (!hash && viewRootId !== 'root') {
+        setViewRootId('root');
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [viewRootId]);
+
 
   // --- Track Last Focus ---
   useEffect(() => {
@@ -311,14 +345,19 @@ export default function App() {
     };
     pruneEmpty(cleanTree);
 
+    // If current viewRootId is invalid (deleted from saved state), fallback to root
     let targetId = focusId;
+    const viewResult = findNodeAndParent(cleanTree, viewRootId);
+    if (!viewResult) {
+        setViewRootId('root');
+    }
+
     const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
     const foundFocus = focusResult ? focusResult.node : null;
     
     if (!foundFocus) {
-      const viewResult = findNodeAndParent(cleanTree, viewRootId);
+      // Find fallback focus
       const rootToUse = viewResult ? viewResult.node : cleanTree; 
-      if (!viewResult && viewRootId !== 'root') setViewRootId('root');
       if (!rootToUse.children) rootToUse.children = [];
       if (rootToUse.children.length === 0) {
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
@@ -747,6 +786,7 @@ export default function App() {
         if (index > 0) {
           const prevSibling = parent.children[index - 1];
           
+          // CONTEXT AWARE BACKSPACE (Move In)
           if (prevSibling.children && prevSibling.children.length > 0 && !prevSibling.collapsed) {
               parent.children.splice(index, 1); 
               prevSibling.children.push(node); 
@@ -759,6 +799,7 @@ export default function App() {
               return newTree;
           }
 
+          // MERGE
           let cursorTarget = prevSibling.text.length; 
           
           if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
@@ -1111,6 +1152,7 @@ export default function App() {
             </div>
 
             <textarea
+              // FIX: Auto-adjust height ALWAYS (even if not focused) to snap shut on remote updates
               ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
