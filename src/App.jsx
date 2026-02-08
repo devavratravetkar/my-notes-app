@@ -2,17 +2,17 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9-1';
+const STORAGE_KEY = 'workflowy-clone-v9-3';
 
-// Default initial state
 const DEFAULT_STATE = {
   tree: {
     id: 'root',
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome! The "Blank Screen" bug is fixed.', collapsed: false, children: [] },
-      { id: '2', text: 'This app now safely loads your state.', collapsed: false, children: [] },
+      { id: '1', text: 'Welcome! Try the new Enter behavior.', collapsed: false, children: [] },
+      { id: '2', text: 'Indent this line (Tab), then hit Enter on it while empty.', collapsed: false, children: [] },
+      { id: '3', text: 'It will unindent instead of creating a ghost node!', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -22,19 +22,13 @@ const DEFAULT_STATE = {
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
 export default function App() {
-  // --- Lazy State Initialization ---
   const [state, setState] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return DEFAULT_STATE;
-
     try {
       const parsed = JSON.parse(saved);
-      // Safety check: ensure parsed object is valid and has a tree
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
-      
-      // Backwards compatibility for older versions (v8 and below)
       if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
-      
       return parsed;
     } catch (e) {
       console.error("Load failed", e);
@@ -58,7 +52,7 @@ export default function App() {
     }));
   }, [tree, viewRootId, focusId]);
 
-  // --- Helpers (Defined before use in useEffect) ---
+  // --- Helpers ---
   const findNodeAndParent = (root, targetId, parent = null) => {
     if (!root) return null;
     if (root.id === targetId) return { node: root, parent };
@@ -69,16 +63,14 @@ export default function App() {
     return null;
   };
 
-  // --- Smart Initialization (Run Once) ---
+  // --- Smart Initialization ---
   useEffect(() => {
-    // 1. CLEANUP: Remove empty nodes that aren't the focused one
     const cleanTree = cloneTree(tree);
     
-    // Helper to recursively clean
+    // 1. Cleanup empty nodes
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
-        // Keep if text exists OR if it's the specific node we are focused on
         const keep = (child.text && child.text.trim() !== '') || (child.id === focusId);
         if (keep) pruneEmpty(child);
         return keep;
@@ -86,27 +78,18 @@ export default function App() {
     };
     pruneEmpty(cleanTree);
 
-    // 2. SAFETY: Ensure we have a valid focus target
+    // 2. Safety Focus
     let targetId = focusId;
-    
-    // CRITICAL FIX: Handle null return safely
     const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
     const foundFocus = focusResult ? focusResult.node : null;
     
     if (!foundFocus) {
-      // Fallback: Find the last node of the current view
       const viewResult = findNodeAndParent(cleanTree, viewRootId);
-      // Fallback to root if viewRootId is invalid/deleted
       const rootToUse = viewResult ? viewResult.node : cleanTree; 
       
-      // If the viewRoot is gone, reset view to global root
-      if (!viewResult && viewRootId !== 'root') {
-        setViewRootId('root');
-      }
-
+      if (!viewResult && viewRootId !== 'root') setViewRootId('root');
       if (!rootToUse.children) rootToUse.children = [];
       
-      // Create new node or focus last existing one
       if (rootToUse.children.length === 0) {
         const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
         rootToUse.children.push(newNode);
@@ -123,14 +106,12 @@ export default function App() {
       }
     }
 
-    // 3. Apply Cleaned State
     setTree(cleanTree);
     setFocusId(targetId);
-    
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // --- Focus Management ---
+  // --- Focus Effect ---
   useEffect(() => {
     if (focusId) {
       setTimeout(() => {
@@ -144,7 +125,7 @@ export default function App() {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         }
-      }, 50); // Increased timeout slightly for reliability
+      }, 50);
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
@@ -153,7 +134,6 @@ export default function App() {
     const sourceResult = findNodeAndParent(tree, sourceId);
     if (!sourceResult) return false;
     const { node: sourceNode } = sourceResult;
-    
     const findInSubtree = (n) => {
       if (n.id === targetId) return true;
       return n.children && n.children.some(findInSubtree);
@@ -236,9 +216,42 @@ export default function App() {
     }
   };
 
-  // --- List Item Logic ---
+  // --- Core List Item Logic ---
+
+  const handleShiftTab = (e, id) => {
+    e.preventDefault();
+    const newTree = cloneTree(tree);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { node, parent } = result;
+    if (parent.id === viewRootId) return; 
+    
+    const grandParentResult = findNodeAndParent(newTree, parent.id);
+    if (!grandParentResult || !grandParentResult.parent) return;
+    const { parent: grandParent } = grandParentResult;
+
+    const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+    const childIndex = parent.children.findIndex(c => c.id === id);
+    parent.children.splice(childIndex, 1);
+    grandParent.children.splice(parentIndex + 1, 0, node);
+    setTree(newTree);
+    setFocusId(id);
+    setFocusTrigger(t => t + 1);
+  };
+
   const handleEnter = (e, id) => {
     e.preventDefault();
+    
+    // 1. Check if current node is empty
+    const currentResult = findNodeAndParent(tree, id);
+    if (currentResult && currentResult.node && currentResult.node.text === '') {
+       // If empty, behave like Shift+Tab (Unindent)
+       handleShiftTab(e, id);
+       return;
+    }
+
+    // 2. If not empty, Standard Create Sibling
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
@@ -298,28 +311,6 @@ export default function App() {
     prevSibling.children.push(nodeToMove);
     prevSibling.collapsed = false; 
     
-    setTree(newTree);
-    setFocusId(id);
-    setFocusTrigger(t => t + 1);
-  };
-
-  const handleShiftTab = (e, id) => {
-    e.preventDefault();
-    const newTree = cloneTree(tree);
-    const result = findNodeAndParent(newTree, id);
-    if (!result || !result.parent) return;
-    
-    const { node, parent } = result;
-    if (parent.id === viewRootId) return; 
-    
-    const grandParentResult = findNodeAndParent(newTree, parent.id);
-    if (!grandParentResult || !grandParentResult.parent) return;
-    const { parent: grandParent } = grandParentResult;
-
-    const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
-    const childIndex = parent.children.findIndex(c => c.id === id);
-    parent.children.splice(childIndex, 1);
-    grandParent.children.splice(parentIndex + 1, 0, node);
     setTree(newTree);
     setFocusId(id);
     setFocusTrigger(t => t + 1);
@@ -443,7 +434,6 @@ export default function App() {
     const sourceIndex = sourceParent.children.findIndex(c => c.id === draggedId);
     sourceParent.children.splice(sourceIndex, 1);
     
-    // Refresh target parent reference
     const freshTargetResult = findNodeAndParent(newTree, targetId);
     const freshTargetParent = freshTargetResult.parent;
     
@@ -545,7 +535,7 @@ export default function App() {
   );
 
   const viewResult = findNodeAndParent(tree, viewRootId);
-  if (!viewResult || !viewResult.node) return <div>Loading or Invalid State (Try Clearing Cache)...</div>;
+  if (!viewResult || !viewResult.node) return <div>Loading...</div>;
   const currentViewNode = viewResult.node;
 
   return (
