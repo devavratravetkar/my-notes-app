@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9-3';
+const STORAGE_KEY = 'workflowy-clone-v9-6';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,9 +10,8 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome! Try the new Enter behavior.', collapsed: false, children: [] },
-      { id: '2', text: 'Indent this line (Tab), then hit Enter on it while empty.', collapsed: false, children: [] },
-      { id: '3', text: 'It will unindent instead of creating a ghost node!', collapsed: false, children: [] },
+      { id: '1', text: 'Fixed: You can now press Enter on an empty screen!', collapsed: false, children: [] },
+      { id: '2', text: 'Note: Multi-node text selection is limited due to browser constraints (Input vs ContentEditable).', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -71,7 +70,11 @@ export default function App() {
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
-        const keep = (child.text && child.text.trim() !== '') || (child.id === focusId);
+        // Keep if text exists OR is focused OR has children (Safety)
+        const hasText = child.text && child.text.trim() !== '';
+        const isFocused = child.id === focusId;
+        const hasChildren = child.children && child.children.length > 0;
+        const keep = hasText || isFocused || hasChildren;
         if (keep) pruneEmpty(child);
         return keep;
       });
@@ -184,10 +187,30 @@ export default function App() {
 
   const handleZoomOut = () => {
      if (viewRootId === 'root') return;
-     const result = findNodeAndParent(tree, viewRootId);
+
+     const newTree = cloneTree(tree);
+     let dirty = false;
+
+     if (focusId && focusId !== viewRootId) {
+        const focusResult = findNodeAndParent(newTree, focusId);
+        if (focusResult && focusResult.node && focusResult.parent) {
+           const { node, parent } = focusResult;
+           // Condition: Empty Text AND No Children (Safe to delete)
+           if (node.text.trim() === '' && (!node.children || node.children.length === 0)) {
+               const index = parent.children.findIndex(c => c.id === focusId);
+               if (index !== -1) {
+                   parent.children.splice(index, 1);
+                   dirty = true;
+               }
+           }
+        }
+     }
+
+     const result = findNodeAndParent(newTree, viewRootId);
      if (result && result.parent) {
        setViewRootId(result.parent.id);
        setFocusId(viewRootId);
+       if (dirty) setTree(newTree);
      }
   };
 
@@ -216,7 +239,7 @@ export default function App() {
     }
   };
 
-  // --- Core List Item Logic ---
+  // --- List Item Logic ---
 
   const handleShiftTab = (e, id) => {
     e.preventDefault();
@@ -243,15 +266,12 @@ export default function App() {
   const handleEnter = (e, id) => {
     e.preventDefault();
     
-    // 1. Check if current node is empty
     const currentResult = findNodeAndParent(tree, id);
     if (currentResult && currentResult.node && currentResult.node.text === '') {
-       // If empty, behave like Shift+Tab (Unindent)
        handleShiftTab(e, id);
        return;
     }
 
-    // 2. If not empty, Standard Create Sibling
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
@@ -267,10 +287,17 @@ export default function App() {
   const handleBackspace = (e, id, text) => {
     if (text !== '') return;
     e.preventDefault();
+
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
     
+    if (result.node.children && result.node.children.length > 0) {
+      result.node.text = "..."; 
+      setTree(newTree);
+      return; 
+    }
+
     const { parent } = result;
     const index = parent.children.findIndex(c => c.id === id);
     let nextFocusId = null;
@@ -394,14 +421,31 @@ export default function App() {
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
+      // Help
       if (e.altKey && e.key === '/') {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
+      
+      // Zoom Out
       if (e.ctrlKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
+      }
+
+      // Enter on Empty State (Restored!)
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        // If we are NOT in an input (e.g. body focus because everything deleted)
+        const activeTag = document.activeElement.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+           const result = findNodeAndParent(tree, viewRootId);
+           // If current view is empty or just has no children
+           if (result && result.node && (!result.node.children || result.node.children.length === 0)) {
+               e.preventDefault();
+               handleAddFirstChild();
+           }
+        }
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
