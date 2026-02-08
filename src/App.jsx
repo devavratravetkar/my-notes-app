@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-complete';
+const STORAGE_KEY = 'workflowy-clone-v11-1';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to the complete v11!', collapsed: false, children: [] },
-      { id: '2', text: 'Search is active: Type "Search" above.', collapsed: false, children: [] },
-      { id: '3', text: 'All previous features (Drag/Drop, Fluid Move, Safety Delete) are intact.', collapsed: false, children: [
-         { id: '3-1', text: 'Nested Item 1', collapsed: false, children: [] },
-         { id: '3-2', text: 'Nested Item 2', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.1 (Polished UI)', collapsed: false, children: [] },
+      { id: '2', text: 'Search for "apple" below to test the new highlighting.', collapsed: false, children: [] },
+      { id: '3', text: 'Container Node (Try searching "apple")', collapsed: false, children: [
+         { id: '3-1', text: 'I am not a match, so I will fade.', collapsed: false, children: [] },
+         { id: '3-2', text: 'apple (I am a match! I stay 100% opaque)', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -102,24 +102,18 @@ export default function App() {
     const matches = [];
     const newTree = cloneTree(tree);
 
-    // Recursive search and Auto-Expand
     const searchAndExpand = (node) => {
       let isMatch = false;
-      // Check current node
       if (node.text.toLowerCase().includes(query)) {
         matches.push(node.id);
         isMatch = true;
       }
-
-      // Check children
       if (node.children && node.children.length > 0) {
         node.children.forEach(child => {
           const childHasMatch = searchAndExpand(child);
           if (childHasMatch) isMatch = true;
         });
       }
-
-      // If this node or any child matched, force expand it
       if (isMatch) node.collapsed = false;
       return isMatch;
     };
@@ -151,7 +145,6 @@ export default function App() {
 
   // --- Focus Management ---
   useEffect(() => {
-    // Only auto-focus list items if we aren't using the search bar
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
@@ -164,7 +157,6 @@ export default function App() {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         } else {
-           // Fallback focus to header if node not found (e.g. collapsed)
            const headerEl = document.getElementById(`input-${viewRootId}`);
            if (headerEl) headerEl.focus();
         }
@@ -560,8 +552,6 @@ export default function App() {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
-    
-    // Check for fluid move (ensuring Ctrl is NOT pressed)
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
@@ -658,11 +648,13 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
+    // FIX: Apply opacity here to the row only, NOT the wrapper
     return (
-      <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg, opacity: isDimmed ? 0.25 : 1 }}>
+      <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0', 
                       background: isSelectedMatch ? (darkMode ? '#333' : '#fff8dc') : 'transparent',
-                      borderRadius: '4px'
+                      borderRadius: '4px',
+                      opacity: isDimmed ? 0.25 : 1 // Opacity moved here!
         }}>
           <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' }}>
              <span 
@@ -719,112 +711,112 @@ export default function App() {
     );
   };
 
-  const renderBreadcrumbs = () => {
-    if (viewRootId === 'root') return null;
-    const path = [];
-    let curr = viewRootId;
-    while(curr) {
-      const result = findNodeAndParent(tree, curr);
-      if(result && result.node) {
-        path.unshift(result.node);
-        curr = result.parent ? result.parent.id : null;
-      } else {
-        curr = null;
-      }
-    }
-    return (
-      <div style={{ marginBottom: '20px', fontSize: '14px', color: theme.dim }}>
-        {path.map((node, idx) => (
-          <span key={node.id}>
-             {idx > 0 && " > "}
-             <span 
-               style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
-               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}>{node.text || 'Home'}</span>
-          </span>
-        ))}
-      </div>
-    );
-  };
-
-  const renderShortcutsModal = () => (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowHelp(false)}>
-      <div style={{ background: theme.panel, padding: '30px', borderRadius: '8px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', color: theme.fg }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>Keyboard Shortcuts</h2>
-          <button style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: theme.dim }} onClick={() => setShowHelp(false)}>×</button>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={styles.shortcutItem}><span>Ctrl + /</span> <span>Focus Search</span></div>
-          <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Shift + Down</span> <span>Expand All</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Right / Left</span> <span>Zoom In / Out</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
-          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
-          <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-          <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
-        </div>
-      </div>
-    </div>
-  );
-
   const viewResult = findNodeAndParent(tree, viewRootId);
   if (!viewResult || !viewResult.node) return <div style={{color: theme.fg, padding: '40px'}}>Loading...</div>;
   const currentViewNode = viewResult.node;
 
   return (
-    <div style={{ 
-      fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px', 
-      color: theme.fg, minHeight: '100vh', backgroundColor: theme.bg, transition: 'background-color 0.2s' 
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '1.5rem', margin: 0, color: theme.dim }}>My Notes</h1>
-        <div style={{ position: 'relative' }}>
-          <input 
-            ref={searchInputRef}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="Search... (Ctrl + /)"
-            style={{
-              background: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.fg,
-              padding: '6px 10px', borderRadius: '4px', width: '220px', outline: 'none'
-            }}
-          />
-          {matchIds.length > 0 && (
-            <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
-              {currentMatchIndex + 1}/{matchIds.length}
-            </div>
-          )}
+    // Outer Container for Full-Screen Background
+    <div style={{ backgroundColor: theme.bg, minHeight: '100vh', color: theme.fg, transition: 'background-color 0.2s' }}>
+      
+      {/* Centered Content Container */}
+      <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px' }}>
+        
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h1 style={{ fontSize: '1.5rem', margin: 0, color: theme.dim }}>My Notes</h1>
+          <div style={{ position: 'relative' }}>
+            <input 
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search... (Ctrl + /)"
+              style={{
+                background: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.fg,
+                padding: '6px 10px', borderRadius: '4px', width: '220px', outline: 'none'
+              }}
+            />
+            {matchIds.length > 0 && (
+              <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
+                {currentMatchIndex + 1}/{matchIds.length}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} onClick={() => setDarkMode(!darkMode)} title="Toggle Theme">{darkMode ? '☀️' : '🌙'}</button>
+            <button style={{ background: 'none', border: 'none', color: theme.highlight, cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' }} onClick={toggleGlobalState}>{isAllExpanded ? 'Collapse All' : 'Expand All'}</button>
+            <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.panel, border: `1px solid ${theme.border}`, borderRadius: '4px', color: theme.fg }} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} onClick={() => setDarkMode(!darkMode)} title="Toggle Theme">{darkMode ? '☀️' : '🌙'}</button>
-          <button style={{ background: 'none', border: 'none', color: theme.highlight, cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' }} onClick={toggleGlobalState}>{isAllExpanded ? 'Collapse All' : 'Expand All'}</button>
-          <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.panel, border: `1px solid ${theme.border}`, borderRadius: '4px', color: theme.fg }} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
-        </div>
-      </div>
-      {renderBreadcrumbs()}
-      <div style={{ background: theme.panel, minHeight: '400px', borderRadius: '8px', padding: '10px' }}>
+        
+        {/* Breadcrumbs */}
         {viewRootId !== 'root' && (
-          <div style={{ marginBottom: '20px', marginLeft: '30px' }}>
-             <input 
-               id={`input-${currentViewNode.id}`}
-               value={currentViewNode.text}
-               onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
-               onKeyDown={handleHeaderKeyDown}
-               style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg }}
-               autoComplete="off"
-             />
+          <div style={{ marginBottom: '20px', fontSize: '14px', color: theme.dim }}>
+            {(() => {
+                const path = [];
+                let curr = viewRootId;
+                while(curr) {
+                  const res = findNodeAndParent(tree, curr);
+                  if(res && res.node) { path.unshift(res.node); curr = res.parent ? res.parent.id : null; }
+                  else curr = null;
+                }
+                return path.map((node, idx) => (
+                  <span key={node.id}>
+                     {idx > 0 && " > "}
+                     <span style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
+                       onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}>{node.text || 'Home'}</span>
+                  </span>
+                ));
+            })()}
           </div>
         )}
-        {currentViewNode.children && currentViewNode.children.map(child => renderNode(child))}
-        {(!currentViewNode.children || currentViewNode.children.length === 0) && (
-           <div style={{ padding: '20px', color: theme.dim, cursor: 'pointer', userSelect: 'none' }} onClick={handleAddFirstChild}>
-             <em>Empty. Click here or press Enter to add items.</em>
-           </div>
+        
+        {/* Editor */}
+        <div style={{ background: theme.panel, minHeight: '400px', borderRadius: '8px', padding: '10px' }}>
+          {viewRootId !== 'root' && (
+            <div style={{ marginBottom: '20px', marginLeft: '30px' }}>
+               <input 
+                 id={`input-${currentViewNode.id}`}
+                 value={currentViewNode.text}
+                 onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
+                 onKeyDown={handleHeaderKeyDown}
+                 style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg }}
+                 autoComplete="off"
+               />
+            </div>
+          )}
+          {currentViewNode.children && currentViewNode.children.map(child => renderNode(child))}
+          {(!currentViewNode.children || currentViewNode.children.length === 0) && (
+             <div style={{ padding: '20px', color: theme.dim, cursor: 'pointer', userSelect: 'none' }} onClick={handleAddFirstChild}>
+               <em>Empty. Click here or press Enter to add items.</em>
+             </div>
+          )}
+        </div>
+
+        {/* Modal */}
+        {showHelp && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowHelp(false)}>
+            <div style={{ background: theme.panel, padding: '30px', borderRadius: '8px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', color: theme.fg }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Shortcuts</h2>
+                <button style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: theme.dim }} onClick={() => setShowHelp(false)}>×</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={styles.shortcutItem}><span>Ctrl + /</span> <span>Focus Search</span></div>
+                <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Shift + Down</span> <span>Expand All</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Right / Left</span> <span>Zoom In / Out</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
+                <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
+                <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-      {showHelp && renderShortcutsModal()}
     </div>
   );
 }
