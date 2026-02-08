@@ -2,18 +2,16 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v5';
+const STORAGE_KEY = 'workflowy-clone-v6';
 
 const INITIAL_DATA = {
   id: 'root',
   text: 'Home',
   collapsed: false,
   children: [
-    { id: '1', text: 'Welcome! Press Alt + ? for shortcuts.', collapsed: false, children: [] },
-    { id: '2', text: 'Use Ctrl + Arrows to zoom/collapse', collapsed: false, children: [] },
-    { id: '3', text: 'Use Shift + Up/Down to move items', collapsed: false, children: [
-      { id: '3-1', text: 'Nested item 1', collapsed: false, children: [] },
-    ]},
+    { id: '1', text: 'Welcome! Press Alt + / for shortcuts.', collapsed: false, children: [] },
+    { id: '2', text: 'Ctrl + Right to Zoom (Focus moves to title)', collapsed: false, children: [] },
+    { id: '3', text: 'You can now edit the Title when zoomed in!', collapsed: false, children: [] },
   ]
 };
 
@@ -41,35 +39,32 @@ export default function App() {
   // --- Focus Management ---
   useEffect(() => {
     if (focusId) {
-      const el = document.getElementById(`input-${focusId}`);
-      if (el) el.focus();
+      // Small timeout ensures DOM is ready after a view switch
+      setTimeout(() => {
+        const el = document.getElementById(`input-${focusId}`);
+        if (el) {
+           el.focus();
+           // Optional: Move cursor to end of text
+           // el.setSelectionRange(el.value.length, el.value.length);
+        }
+      }, 0);
     }
-  }, [focusId, tree]);
+  }, [focusId, viewRootId]); // Re-run when view changes
 
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // 1. Help Toggle (Alt + ?)
-      if (e.altKey && e.key === '?') {
+      // 1. Help Toggle (Alt + /)
+      if (e.altKey && e.key === '/') {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
 
-      // 2. Zoom Out (Ctrl + Left) - Global context
+      // 2. Zoom Out (Ctrl + Left)
       if (e.ctrlKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
-      }
-
-      // 3. Handle "Enter" on Empty Page
-      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        // Only if we aren't focused on an input (handled locally) or if list is empty
-        const { node: currentViewNode } = findNodeAndParent(tree, viewRootId);
-        if (currentViewNode && currentViewNode.children.length === 0) {
-          e.preventDefault();
-          handleAddFirstChild();
-        }
       }
     };
     
@@ -125,7 +120,6 @@ export default function App() {
     setTree(newTree);
   };
   
-  // Explicit collapse/expand for keyboard shortcuts
   const setCollapseState = (id, shouldCollapse) => {
     const newTree = cloneTree(tree);
     const { node } = findNodeAndParent(newTree, id);
@@ -136,21 +130,40 @@ export default function App() {
   const handleZoomOut = () => {
      if (viewRootId === 'root') return;
      const { parent } = findNodeAndParent(tree, viewRootId);
-     if (parent) setViewRootId(parent.id);
+     if (parent) {
+       setViewRootId(parent.id);
+       setFocusId(viewRootId); // Focus the node we just zoomed out of (the old header)
+     }
   };
 
   const handleAddFirstChild = () => {
     const newTree = cloneTree(tree);
     const { node } = findNodeAndParent(newTree, viewRootId);
     if (!node) return;
+    
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-    node.children.push(newNode);
+    node.children.unshift(newNode); // Add to TOP of list
+    
     setTree(newTree);
     setFocusId(newNode.id);
   };
 
-  // --- Keyboard Logic (Node Specific) ---
+  // --- Header (Title) Input Logic ---
+  const handleHeaderKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddFirstChild();
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const { node } = findNodeAndParent(tree, viewRootId);
+      if (node.children && node.children.length > 0) {
+        setFocusId(node.children[0].id);
+      }
+    }
+  };
 
+  // --- List Item Keyboard Logic ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
@@ -178,7 +191,12 @@ export default function App() {
       }
       nextFocusId = sibling.id;
     } else {
-      nextFocusId = parent.id !== viewRootId ? parent.id : null;
+      // If we are deleting the first child, focus goes to the Header (if zoomed)
+      if (parent.id === viewRootId && viewRootId !== 'root') {
+        nextFocusId = viewRootId;
+      } else if (parent.id !== viewRootId) {
+        nextFocusId = parent.id;
+      }
     }
     parent.children.splice(index, 1);
     setTree(newTree);
@@ -224,14 +242,12 @@ export default function App() {
     
     const index = parent.children.findIndex(c => c.id === id);
     if (direction === 'up' && index > 0) {
-       // Swap with prev
        const temp = parent.children[index];
        parent.children[index] = parent.children[index - 1];
        parent.children[index - 1] = temp;
        setTree(newTree);
        setFocusId(id);
     } else if (direction === 'down' && index < parent.children.length - 1) {
-       // Swap with next
        const temp = parent.children[index];
        parent.children[index] = parent.children[index + 1];
        parent.children[index + 1] = temp;
@@ -240,53 +256,57 @@ export default function App() {
     }
   };
 
-  const handleKeyDown = (e, node) => {
-    // 1. Enter
-    if (e.key === 'Enter') handleEnter(e, node.id);
-    // 2. Backspace
-    if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
-    // 3. Tab
-    if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
-    // 4. Shift + Tab
-    if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
-
-    // 5. Navigation & Zoom (Ctrl + Arrows)
-    if (e.ctrlKey && e.key === 'ArrowRight') {
-       e.preventDefault();
-       setViewRootId(node.id); // Zoom In
-    }
-    // Ctrl + Left handled in Global (to allow unzooming from anywhere)
-
-    // 6. Expand/Collapse (Ctrl + Up/Down)
-    if (e.ctrlKey && e.key === 'ArrowDown') {
-       e.preventDefault();
-       setCollapseState(node.id, false); // Expand
-    }
-    if (e.ctrlKey && e.key === 'ArrowUp') {
-       e.preventDefault();
-       setCollapseState(node.id, true); // Collapse
-    }
-
-    // 7. Reorder (Shift + Up/Down)
-    if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
-    if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
-
-    // 8. Navigation (Plain Up/Down) - Must be last to not override combos
-    if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
-       if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
-       if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
-    }
-  };
-
   const handleArrow = (e, id, direction) => {
     e.preventDefault();
     const { node: viewRoot } = findNodeAndParent(tree, viewRootId);
     const flatList = getFlatList(viewRoot);
     const currentIndex = flatList.findIndex(n => n.id === id);
-    if (direction === 'up' && currentIndex > 0) {
-      setFocusId(flatList[currentIndex - 1].id);
-    } else if (direction === 'down' && currentIndex < flatList.length - 1) {
-      setFocusId(flatList[currentIndex + 1].id);
+
+    if (direction === 'up') {
+      if (currentIndex > 0) {
+        setFocusId(flatList[currentIndex - 1].id);
+      } else if (viewRootId !== 'root') {
+        // If at top of list and we are zoomed in, go to Header
+        setFocusId(viewRootId);
+      }
+    } else if (direction === 'down') {
+      if (currentIndex < flatList.length - 1) {
+        setFocusId(flatList[currentIndex + 1].id);
+      }
+    }
+  };
+
+  const handleItemKeyDown = (e, node) => {
+    if (e.key === 'Enter') handleEnter(e, node.id);
+    if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
+    if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
+    if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
+
+    // Ctrl + Right: Zoom In AND Focus
+    if (e.ctrlKey && e.key === 'ArrowRight') {
+       e.preventDefault();
+       setViewRootId(node.id);
+       setFocusId(node.id); // Explicitly focus the new header
+    }
+    
+    // Expand/Collapse
+    if (e.ctrlKey && e.key === 'ArrowDown') {
+       e.preventDefault();
+       setCollapseState(node.id, false); 
+    }
+    if (e.ctrlKey && e.key === 'ArrowUp') {
+       e.preventDefault();
+       setCollapseState(node.id, true); 
+    }
+
+    // Reorder
+    if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
+    if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
+
+    // Navigation
+    if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
+       if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
+       if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
     }
   };
 
@@ -333,7 +353,10 @@ export default function App() {
              >▼</span>
              <span 
                style={styles.bullet} 
-               onClick={() => setViewRootId(node.id)}
+               onClick={() => {
+                 setViewRootId(node.id);
+                 setFocusId(node.id);
+               }}
                draggable onDragStart={(e) => handleDragStart(e, node.id)}
                onDragEnd={handleDragEnd} onDragOver={(e) => e.preventDefault()}
                onDrop={(e) => handleDrop(e, node.id)}
@@ -343,7 +366,7 @@ export default function App() {
             id={`input-${node.id}`}
             value={node.text}
             onChange={(e) => handleUpdateText(node.id, e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, node)}
+            onKeyDown={(e) => handleItemKeyDown(e, node)}
             style={styles.input} autoComplete="off"
           />
         </div>
@@ -368,7 +391,10 @@ export default function App() {
         {path.map((node, idx) => (
           <span key={node.id}>
              {idx > 0 && " > "}
-             <span style={styles.breadcrumbLink} onClick={() => setViewRootId(node.id)}>{node.text || 'Home'}</span>
+             <span style={styles.breadcrumbLink} onClick={() => {
+               setViewRootId(node.id);
+               setFocusId(node.id);
+             }}>{node.text || 'Home'}</span>
           </span>
         ))}
       </div>
@@ -383,7 +409,7 @@ export default function App() {
           <button style={styles.closeBtn} onClick={() => setShowHelp(false)}>×</button>
         </div>
         <div style={styles.shortcutList}>
-          <div style={styles.shortcutItem}><span>Alt + ?</span> <span>Toggle Help</span></div>
+          <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
           <div style={styles.shortcutItem}><span>Ctrl + Right</span> <span>Zoom In</span></div>
           <div style={styles.shortcutItem}><span>Ctrl + Left</span> <span>Zoom Out</span></div>
           <div style={styles.shortcutItem}><span>Ctrl + Down</span> <span>Expand</span></div>
@@ -403,14 +429,28 @@ export default function App() {
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <h1 style={styles.header}>My Notes</h1>
-        <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (Alt + ?)</button>
+        <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
       </div>
       
       {renderBreadcrumbs()}
       
       <div style={styles.editor}>
-        {viewRootId !== 'root' && <h2 style={styles.zoomedTitle}>{currentViewNode.text}</h2>}
+        {viewRootId !== 'root' && (
+          // Editable Title Input
+          <div style={styles.zoomedTitleContainer}>
+             <input 
+               id={`input-${currentViewNode.id}`} // Same ID scheme for Focus Logic
+               style={styles.zoomedTitleInput}
+               value={currentViewNode.text}
+               onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
+               onKeyDown={handleHeaderKeyDown}
+               autoComplete="off"
+             />
+          </div>
+        )}
+        
         {currentViewNode.children.map(child => renderNode(child))}
+        
         {currentViewNode.children.length === 0 && (
            <div style={styles.emptyState} onClick={handleAddFirstChild}>
              <em>Empty. Click here or press Enter to add items.</em>
@@ -432,7 +472,11 @@ const styles = {
   breadcrumbs: { marginBottom: '20px', fontSize: '14px', color: '#666' },
   breadcrumbLink: { cursor: 'pointer', textDecoration: 'underline', color: '#007bff' },
   editor: { background: '#fff', minHeight: '400px' },
-  zoomedTitle: { fontSize: '1.8rem', marginBottom: '20px', marginLeft: '30px' },
+  
+  // New Styles for the Header Input
+  zoomedTitleContainer: { marginBottom: '20px', marginLeft: '30px' },
+  zoomedTitleInput: { fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent' },
+
   nodeContainer: { marginLeft: '20px', position: 'relative' },
   nodeRow: { display: 'flex', alignItems: 'center', padding: '2px 0' },
   controls: { display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' },
