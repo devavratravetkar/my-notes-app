@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-25';
+const STORAGE_KEY = 'workflowy-clone-v13-27';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,10 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.25 (Insert Before & Focus)', collapsed: false, children: [] },
-      { id: '2', text: 'Place cursor at the START of this line and hit Enter.', collapsed: false, children: [] },
-      { id: '3', text: 'It creates a new node above AND focuses it immediately, so you can type.', collapsed: false, children: [] },
-      { id: '4', text: 'All previous features (Sanitizer, Rescue, Context Moves) are preserved.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.27 (Enter Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Place cursor at start | and hit Enter.', collapsed: false, children: [] },
+      { id: '3', text: 'It creates a new node above and focuses it perfectly.', collapsed: false, children: [
+         { id: '3-1', text: 'We prevented the cleanup script from deleting the new node instantly.', collapsed: false, children: [] }
+      ]},
+      { id: '4', text: 'Import/Export, Sanitizer, and Context-Moves are all stable.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -29,6 +31,55 @@ const escapeRegExp = (string) => {
 
 const truncate = (str, n) => {
   return (str && str.length > n) ? str.substr(0, n - 1) + '...' : str;
+};
+
+// --- Parser for Smart Paste ---
+const parseTextToNodes = (text) => {
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) return [];
+
+  const rootNodes = [];
+  const stack = [{ level: -1, children: rootNodes }];
+
+  lines.forEach(line => {
+    if (!line.trim()) return;
+    const leadingSpaceMatch = line.match(/^(\s*)/);
+    const indentString = leadingSpaceMatch ? leadingSpaceMatch[1] : '';
+    const indentLevel = indentString.replace(/\t/g, '    ').length;
+    const cleanText = line.replace(/^\s*([-*]|\d+\.)\s+/, '').trim();
+
+    const newNode = {
+      id: GENERATE_ID(),
+      text: cleanText,
+      collapsed: false,
+      children: []
+    };
+
+    while (stack.length > 1 && stack[stack.length - 1].level >= indentLevel) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1];
+    parent.children.push(newNode);
+    stack.push({ level: indentLevel, children: newNode.children });
+  });
+
+  return rootNodes;
+};
+
+// --- Exporter ---
+const treeToString = (node, depth = 0) => {
+  let output = '';
+  if (node.id !== 'root') {
+    const indent = '  '.repeat(depth);
+    output += `${indent}- ${node.text}\n`;
+  }
+  if (node.children) {
+    node.children.forEach(child => {
+      output += treeToString(child, node.id === 'root' ? 0 : depth + 1);
+    });
+  }
+  return output;
 };
 
 export default function App() {
@@ -59,6 +110,7 @@ export default function App() {
   const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
   const searchInputRef = useRef(null);
@@ -336,6 +388,31 @@ export default function App() {
     });
   };
 
+  // --- SMART PASTE HANDLER ---
+  const handlePaste = (e, id) => {
+    const pastedData = e.clipboardData.getData('Text');
+    if (!pastedData.includes('\n')) return;
+
+    e.preventDefault();
+    skipBlurRef.current = true;
+
+    const newNodes = parseTextToNodes(pastedData);
+    if (newNodes.length === 0) return;
+
+    setTree(prev => {
+        const newTree = cloneTree(prev);
+        const result = findNodeAndParent(newTree, id);
+        if (!result || !result.node) return prev;
+
+        const { node, parent } = result;
+        const index = parent.children.findIndex(c => c.id === id);
+        parent.children.splice(index + 1, 0, ...newNodes);
+        
+        return newTree;
+    });
+    setFocusTrigger(t => t + 1);
+  };
+
   // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
@@ -379,7 +456,6 @@ export default function App() {
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
     
-    // FOCUS RESCUE
     let rescueFocusId = null;
     if (focusId) {
         const path = findPath(tree, focusId);
@@ -572,11 +648,8 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
-    // Only skip blur if Splitting/Moving Down.
-    // If inserting ABOVE, we are SWITCHING focus, so the current node will blur naturally.
-    if (cursor > 0) {
-        skipBlurRef.current = true;
-    }
+    // FIX: Skip blur for ALL Enter actions to protect structural integrity
+    skipBlurRef.current = true;
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -605,13 +678,11 @@ export default function App() {
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
             
-            // FOCUS NEW NODE
             setTimeout(() => {
                 setFocusId(newNode.id);
                 cursorGoalRef.current = 'start';
                 setFocusTrigger(t => t + 1);
             }, 0);
-
         } else if (shouldSplitIntoChild) {
             // SPLIT TO CHILD
             const textBefore = text.slice(0, cursor);
@@ -903,7 +974,10 @@ export default function App() {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
-      if (e.key === 'Escape') setShowHelp(false);
+      if (e.key === 'Escape') {
+          setShowHelp(false);
+          setShowExport(false);
+      }
       
       if (e.altKey && e.key === 'h') {
          e.preventDefault();
@@ -1044,6 +1118,7 @@ export default function App() {
               onKeyDown={(e) => handleItemKeyDown(e, node)}
               onFocus={() => { setFocusId(node.id); }}
               onBlur={() => handleBlur(node.id)}
+              onPaste={(e) => handlePaste(e, node.id)}
               rows={1}
               style={{
                 ...commonTextStyle,
@@ -1129,6 +1204,7 @@ export default function App() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.highlight, border: 'none', borderRadius: '4px', color: '#fff' }} onClick={() => setShowExport(true)}>Export</button>
             <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }} onClick={() => setDarkMode(!darkMode)} title="Toggle Theme">{darkMode ? '☀️' : '🌙'}</button>
             <button style={{ background: 'none', border: 'none', color: theme.highlight, cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' }} onClick={toggleGlobalState}>{isAllExpanded ? 'Collapse All' : 'Expand All'}</button>
             <button style={{ padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: theme.panel, border: `1px solid ${theme.border}`, borderRadius: '4px', color: theme.fg }} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
@@ -1169,7 +1245,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Modal */}
+        {/* Help Modal */}
         {showHelp && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowHelp(false)}>
             <div style={{ background: theme.panel, padding: '30px', borderRadius: '8px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', color: theme.fg }} onClick={e => e.stopPropagation()}>
@@ -1188,6 +1264,26 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
                 <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Export Modal */}
+        {showExport && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowExport(false)}>
+            <div style={{ background: theme.panel, padding: '30px', borderRadius: '8px', width: '600px', maxWidth: '90%', height: '500px', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', color: theme.fg }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Export / Backup</h2>
+                <button style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: theme.dim }} onClick={() => setShowExport(false)}>×</button>
+              </div>
+              <textarea 
+                readOnly
+                value={treeToString(tree)}
+                style={{ flex: 1, background: theme.inputBg, color: theme.fg, border: `1px solid ${theme.border}`, borderRadius: '4px', padding: '10px', resize: 'none', fontFamily: 'monospace', fontSize: '14px', whiteSpace: 'pre' }}
+              />
+              <div style={{ marginTop: '10px', fontSize: '12px', color: theme.dim }}>
+                Copy this text to save a backup. You can paste lists from other apps directly into the editor to import.
               </div>
             </div>
           </div>
