@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v9-8';
+const STORAGE_KEY = 'workflowy-clone-v10';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome! Try Shift + Up/Down now.', collapsed: false, children: [] },
-      { id: '2', text: 'Structure:', collapsed: false, children: [
-        { id: '2-1', text: 'Top Item', collapsed: false, children: [] },
-        { id: '2-2', text: 'Bottom Item', collapsed: false, children: [] }
+      { id: '1', text: 'New: Global Expand/Collapse!', collapsed: false, children: [] },
+      { id: '2', text: 'Try the buttons top-right or shortcuts:', collapsed: false, children: [
+         { id: '2-1', text: 'Ctrl + Shift + Up to Collapse All', collapsed: false, children: [] },
+         { id: '2-2', text: 'Ctrl + Shift + Down to Expand All', collapsed: false, children: [
+            { id: '2-2-1', text: 'Even deeply nested items like this.', collapsed: false, children: [] }
+         ]}
       ]},
-      { id: '3', text: 'You can move this node INTO "Structure" just by pressing Shift+Up!', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -69,8 +70,6 @@ export default function App() {
   // --- Smart Initialization ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
-    
-    // 1. Cleanup empty nodes
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
@@ -84,7 +83,6 @@ export default function App() {
     };
     pruneEmpty(cleanTree);
 
-    // 2. Safety Focus
     let targetId = focusId;
     const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
     const foundFocus = focusResult ? focusResult.node : null;
@@ -199,6 +197,35 @@ export default function App() {
     }
   };
 
+  // --- GLOBAL EXPAND / COLLAPSE ---
+  const handleExpandAll = () => {
+    const newTree = cloneTree(tree);
+    // Recursive expand
+    const traverse = (node) => {
+      if (node.children) {
+        node.collapsed = false;
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(newTree);
+    setTree(newTree);
+  };
+
+  const handleCollapseAll = () => {
+    const newTree = cloneTree(tree);
+    // Recursive collapse
+    const traverse = (node) => {
+      if (node.children) {
+        node.collapsed = true;
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(newTree);
+    // Ensure root remains expanded so we can see top level items
+    newTree.collapsed = false; 
+    setTree(newTree);
+  };
+
   const handleZoomOut = () => {
      if (viewRootId === 'root') return;
 
@@ -252,76 +279,7 @@ export default function App() {
     }
   };
 
-  // --- FLUID MOVE NODE (The Fix) ---
-  const handleMoveNode = (e, id, direction) => {
-    e.preventDefault();
-    const newTree = cloneTree(tree);
-    const result = findNodeAndParent(newTree, id);
-    if (!result || !result.parent) return;
-    
-    const { node, parent } = result;
-    const index = parent.children.findIndex(c => c.id === id);
-
-    if (direction === 'up') {
-      // Case 1: Has Previous Sibling
-      if (index > 0) {
-         const prevSibling = parent.children[index - 1];
-         // Logic: If Prev is Expanded & Has Children -> Move INTO (as last child)
-         if (!prevSibling.collapsed && prevSibling.children && prevSibling.children.length > 0) {
-             parent.children.splice(index, 1);
-             prevSibling.children.push(node);
-         } else {
-             // Standard Swap
-             parent.children[index] = prevSibling;
-             parent.children[index - 1] = node;
-         }
-      } 
-      // Case 2: At Top -> Move OUT (Unindent)
-      else {
-         if (parent.id === viewRootId || parent.id === 'root') return; // Cannot move out of view
-         const gpResult = findNodeAndParent(newTree, parent.id);
-         if (gpResult && gpResult.parent) {
-             const { parent: grandParent } = gpResult;
-             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
-             parent.children.splice(index, 1); // Remove from current
-             grandParent.children.splice(parentIndex, 0, node); // Insert BEFORE parent
-         }
-      }
-    } 
-    else if (direction === 'down') {
-      // Case 1: Has Next Sibling
-      if (index < parent.children.length - 1) {
-         const nextSibling = parent.children[index + 1];
-         // Logic: If Next is Expanded & Has Children -> Move INTO (as first child)
-         if (!nextSibling.collapsed && nextSibling.children && nextSibling.children.length > 0) {
-             parent.children.splice(index, 1);
-             nextSibling.children.unshift(node);
-         } else {
-             // Standard Swap
-             parent.children[index] = nextSibling;
-             parent.children[index + 1] = node;
-         }
-      } 
-      // Case 2: At Bottom -> Move OUT (Unindent)
-      else {
-         if (parent.id === viewRootId || parent.id === 'root') return; // Cannot move out of view
-         const gpResult = findNodeAndParent(newTree, parent.id);
-         if (gpResult && gpResult.parent) {
-             const { parent: grandParent } = gpResult;
-             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
-             parent.children.splice(index, 1); // Remove from current
-             grandParent.children.splice(parentIndex + 1, 0, node); // Insert AFTER parent
-         }
-      }
-    }
-
-    setTree(newTree);
-    setFocusId(id);
-    setFocusTrigger(t => t + 1);
-  };
-
-
-  // --- Standard List Logic ---
+  // --- List Item Logic ---
 
   const handleShiftTab = (e, id) => {
     e.preventDefault();
@@ -425,6 +383,65 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
+  const handleMoveNode = (e, id, direction) => {
+    e.preventDefault();
+    const newTree = cloneTree(tree);
+    const result = findNodeAndParent(newTree, id);
+    if (!result || !result.parent) return;
+    
+    const { node, parent } = result;
+    const index = parent.children.findIndex(c => c.id === id);
+
+    if (direction === 'up') {
+      if (index > 0) {
+         const prevSibling = parent.children[index - 1];
+         if (!prevSibling.collapsed && prevSibling.children && prevSibling.children.length > 0) {
+             parent.children.splice(index, 1);
+             prevSibling.children.push(node);
+         } else {
+             parent.children[index] = prevSibling;
+             parent.children[index - 1] = node;
+         }
+      } 
+      else {
+         if (parent.id === viewRootId || parent.id === 'root') return;
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+             parent.children.splice(index, 1);
+             grandParent.children.splice(parentIndex, 0, node);
+         }
+      }
+    } 
+    else if (direction === 'down') {
+      if (index < parent.children.length - 1) {
+         const nextSibling = parent.children[index + 1];
+         if (!nextSibling.collapsed && nextSibling.children && nextSibling.children.length > 0) {
+             parent.children.splice(index, 1);
+             nextSibling.children.unshift(node);
+         } else {
+             parent.children[index] = nextSibling;
+             parent.children[index + 1] = node;
+         }
+      } 
+      else {
+         if (parent.id === viewRootId || parent.id === 'root') return;
+         const gpResult = findNodeAndParent(newTree, parent.id);
+         if (gpResult && gpResult.parent) {
+             const { parent: grandParent } = gpResult;
+             const parentIndex = grandParent.children.findIndex(c => c.id === parent.id);
+             parent.children.splice(index, 1);
+             grandParent.children.splice(parentIndex + 1, 0, node);
+         }
+      }
+    }
+
+    setTree(newTree);
+    setFocusId(id);
+    setFocusTrigger(t => t + 1);
+  };
+
   const handleArrow = (e, id, direction) => {
     e.preventDefault();
     const result = findNodeAndParent(tree, viewRootId);
@@ -478,17 +495,30 @@ export default function App() {
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
+      // Toggle Help
       if (e.altKey && e.key === '/') {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
       if (e.key === 'Escape') setShowHelp(false);
       
+      // Zoom Out
       if (e.ctrlKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
       }
 
+      // Global Expand/Collapse
+      if (e.ctrlKey && e.shiftKey && e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleExpandAll();
+      }
+      if (e.ctrlKey && e.shiftKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleCollapseAll();
+      }
+
+      // Enter on Empty State
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
         const activeTag = document.activeElement.tagName;
         if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
@@ -619,11 +649,11 @@ export default function App() {
         </div>
         <div style={styles.shortcutList}>
           <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Right</span> <span>Zoom In</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Left</span> <span>Zoom Out</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Down</span> <span>Expand</span></div>
-          <div style={styles.shortcutItem}><span>Ctrl + Up</span> <span>Collapse</span></div>
-          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Shift + Down</span> <span>Expand All</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Right / Left</span> <span>Zoom In / Out</span></div>
+          <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
+          <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node (Fluid)</span></div>
           <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
           <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
         </div>
@@ -639,7 +669,12 @@ export default function App() {
     <div style={styles.container}>
       <div style={styles.headerRow}>
         <h1 style={styles.header}>My Notes</h1>
-        <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help (Alt + /)</button>
+        <div style={styles.headerControls}>
+          <button style={styles.linkBtn} onClick={handleExpandAll}>Expand All</button>
+          <span style={styles.separator}>|</span>
+          <button style={styles.linkBtn} onClick={handleCollapseAll}>Collapse All</button>
+          <button style={styles.helpBtn} onClick={() => setShowHelp(true)}>Help</button>
+        </div>
       </div>
       
       {renderBreadcrumbs()}
@@ -675,8 +710,11 @@ export default function App() {
 const styles = {
   container: { fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px', color: '#333' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+  headerControls: { display: 'flex', alignItems: 'center', gap: '8px' },
   header: { fontSize: '1.5rem', margin: 0, color: '#888' },
-  helpBtn: { padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px' },
+  linkBtn: { background: 'none', border: 'none', color: '#007bff', cursor: 'pointer', fontSize: '14px', padding: '0', textDecoration: 'underline' },
+  separator: { color: '#ccc' },
+  helpBtn: { padding: '5px 10px', fontSize: '14px', cursor: 'pointer', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '4px', marginLeft: '10px' },
   breadcrumbs: { marginBottom: '20px', fontSize: '14px', color: '#666' },
   breadcrumbLink: { cursor: 'pointer', textDecoration: 'underline', color: '#007bff' },
   editor: { background: '#fff', minHeight: '400px' },
