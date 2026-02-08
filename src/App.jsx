@@ -1,68 +1,112 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v7';
+const STORAGE_KEY = 'workflowy-clone-v9';
 
-const INITIAL_DATA = {
-  id: 'root',
-  text: 'Home',
-  collapsed: false,
-  children: [
-    { id: '1', text: 'Welcome! Press Alt + / for shortcuts.', collapsed: false, children: [] },
-    { id: '2', text: 'Focus now auto-loads at the bottom!', collapsed: false, children: [] },
-  ]
+// Default initial state for a brand new user
+const DEFAULT_STATE = {
+  tree: {
+    id: 'root',
+    text: 'Home',
+    collapsed: false,
+    children: [
+      { id: '1', text: 'Welcome! This app now saves your cursor position.', collapsed: false, children: [] },
+      { id: '2', text: 'Try refreshing the page while typing here.', collapsed: false, children: [] },
+    ]
+  },
+  viewRootId: 'root',
+  focusId: null
 };
 
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
 export default function App() {
-  const [tree, setTree] = useState(INITIAL_DATA);
-  const [viewRootId, setViewRootId] = useState('root');
-  const [focusId, setFocusId] = useState(null);
+  // We initialize state lazily to handle the complex load logic once
+  const [state, setState] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return DEFAULT_STATE;
+
+    try {
+      const parsed = JSON.parse(saved);
+      // Backwards compatibility: if user had v8 data (just tree), wrap it
+      if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
+      return parsed;
+    } catch (e) {
+      console.error("Load failed", e);
+      return DEFAULT_STATE;
+    }
+  });
+
+  const [tree, setTree] = useState(state.tree);
+  const [viewRootId, setViewRootId] = useState(state.viewRootId);
+  const [focusId, setFocusId] = useState(state.focusId);
+  const [focusTrigger, setFocusTrigger] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
-  // --- Persistence & Initialization ---
+  // --- Persistence ---
+  // Save EVERYTHING whenever any part of state changes
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    let loadedTree = INITIAL_DATA;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      tree,
+      viewRootId,
+      focusId
+    }));
+  }, [tree, viewRootId, focusId]);
 
-    if (saved) {
-      try { loadedTree = JSON.parse(saved); } catch (e) { console.error(e); }
+  // --- Smart Initialization (Run Once) ---
+  useEffect(() => {
+    // 1. CLEANUP: Remove empty nodes that aren't the focused one
+    const cleanTree = cloneTree(tree);
+    
+    // Helper to recursively clean
+    const pruneEmpty = (node) => {
+      if (!node.children) return;
+      // Filter out children that are empty AND not the focused one
+      node.children = node.children.filter(child => {
+        const keep = (child.text.trim() !== '') || (child.id === focusId);
+        if (keep) pruneEmpty(child); // Recurse
+        return keep;
+      });
+    };
+    pruneEmpty(cleanTree);
+
+    // 2. SAFETY: Ensure we have a valid focus target
+    // If the saved focusId is missing or invalid, we need a fallback
+    let targetId = focusId;
+    const { node: foundFocus } = findNodeAndParent(cleanTree, targetId || 'non-existent');
+    
+    if (!foundFocus) {
+      // Fallback: Find the last node of the current view
+      const { node: viewRoot } = findNodeAndParent(cleanTree, viewRootId);
+      const rootToUse = viewRoot || cleanTree; // Safety fallback to global root
+      
+      if (!rootToUse.children) rootToUse.children = [];
+      
+      // If no children, create one. If children exist, focus the last one.
+      if (rootToUse.children.length === 0) {
+        const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+        rootToUse.children.push(newNode);
+        targetId = newNode.id;
+      } else {
+        const lastChild = rootToUse.children[rootToUse.children.length - 1];
+        if (lastChild.text === '') {
+           targetId = lastChild.id;
+        } else {
+           // Create new only if last one isn't empty
+           const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+           rootToUse.children.push(newNode);
+           targetId = newNode.id;
+        }
+      }
     }
 
-    // --- AUTO-FOCUS LOGIC ---
-    // We modify the loaded tree immediately to ensure a blank line exists at the end
-    const root = loadedTree; 
+    // 3. Apply Cleaned State
+    setTree(cleanTree);
+    setFocusId(targetId);
     
-    // Safety check for children array
-    if (!root.children) root.children = [];
-    
-    const lastChild = root.children[root.children.length - 1];
-    let targetId;
-
-    if (lastChild && lastChild.text === '') {
-      // Case A: Last node is already empty. Just focus it.
-      targetId = lastChild.id;
-    } else {
-      // Case B: Last node has text (or list is empty). Create new node.
-      const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-      root.children.push(newNode);
-      targetId = newNode.id;
-    }
-
-    // Set state with the (potentially modified) tree
-    setTree(loadedTree);
-    
-    // Slight delay to ensure DOM is ready for focus
-    setTimeout(() => setFocusId(targetId), 50);
-
-  }, []); // Run ONLY on mount
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tree));
-  }, [tree]);
+  }, []); // Empty dependency array = runs only on mount
 
   // --- Focus Management ---
   useEffect(() => {
@@ -71,33 +115,17 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           // Ensure cursor is at the end (useful if focusing existing text)
-           el.setSelectionRange(el.value.length, el.value.length);
-           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+           const len = el.value.length; 
+           el.setSelectionRange(len, len);
+           // Only scroll if needed (prevents jumpiness)
+           const rect = el.getBoundingClientRect();
+           if (rect.bottom > window.innerHeight || rect.top < 0) {
+             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+           }
         }
       }, 0);
     }
-  }, [focusId, viewRootId]);
-
-  // --- Global Keyboard Shortcuts ---
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      // 1. Help Toggle (Alt + /)
-      if (e.altKey && e.key === '/') {
-        e.preventDefault();
-        setShowHelp(prev => !prev);
-      }
-      if (e.key === 'Escape') setShowHelp(false);
-
-      // 2. Zoom Out (Ctrl + Left)
-      if (e.ctrlKey && e.key === 'ArrowLeft') {
-         e.preventDefault();
-         handleZoomOut();
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [tree, viewRootId, showHelp]);
+  }, [focusId, viewRootId, focusTrigger]); 
 
   // --- Helpers ---
   const findNodeAndParent = (root, targetId, parent = null) => {
@@ -240,6 +268,7 @@ export default function App() {
     prevSibling.collapsed = false; 
     setTree(newTree);
     setFocusId(id);
+    setFocusTrigger(t => t + 1);
   };
 
   const handleShiftTab = (e, id) => {
@@ -255,6 +284,7 @@ export default function App() {
     grandParent.children.splice(parentIndex + 1, 0, node);
     setTree(newTree);
     setFocusId(id);
+    setFocusTrigger(t => t + 1);
   };
 
   const handleMoveNode = (e, id, direction) => {
@@ -269,12 +299,14 @@ export default function App() {
        parent.children[index - 1] = temp;
        setTree(newTree);
        setFocusId(id);
+       setFocusTrigger(t => t + 1);
     } else if (direction === 'down' && index < parent.children.length - 1) {
        const temp = parent.children[index];
        parent.children[index] = parent.children[index + 1];
        parent.children[index + 1] = temp;
        setTree(newTree);
        setFocusId(id);
+       setFocusTrigger(t => t + 1);
     }
   };
 
@@ -308,7 +340,6 @@ export default function App() {
        setViewRootId(node.id);
        setFocusId(node.id);
     }
-    
     if (e.ctrlKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
@@ -317,7 +348,6 @@ export default function App() {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
-
     if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
@@ -326,6 +356,23 @@ export default function App() {
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
     }
   };
+
+  // --- Global Keyboard Shortcuts ---
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.altKey && e.key === '/') {
+        e.preventDefault();
+        setShowHelp(prev => !prev);
+      }
+      if (e.key === 'Escape') setShowHelp(false);
+      if (e.ctrlKey && e.key === 'ArrowLeft') {
+         e.preventDefault();
+         handleZoomOut();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [tree, viewRootId, showHelp]);
 
   // --- Drag and Drop ---
   const handleDragStart = (e, id) => {
@@ -351,6 +398,8 @@ export default function App() {
     const targetIndex = freshTargetParent.children.findIndex(c => c.id === targetId);
     freshTargetParent.children.splice(targetIndex, 0, sourceNode);
     setTree(newTree);
+    setFocusTrigger(t => t + 1);
+    setFocusId(draggedId);
   };
 
   // --- Renderers ---
