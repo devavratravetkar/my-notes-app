@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-40';
+const STORAGE_KEY = 'workflowy-clone-v13-41';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,13 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.40 (Tab Key Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'We fixed the "ReferenceError" that caused the blank screen on indent.', collapsed: false, children: [] },
-      { id: '3', text: 'Try it now:', collapsed: false, children: [
-         { id: '3-1', text: 'Click this node and press TAB.', collapsed: false, children: [] },
-         { id: '3-2', text: 'It should indent smoothly without crashing.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.41 (Drag & Drop Restored)', collapsed: false, children: [] },
+      { id: '2', text: 'We restored the missing "isDescendant" helper function.', collapsed: false, children: [] },
+      { id: '3', text: 'Try dragging this node...', collapsed: false, children: [
+         { id: '3-1', text: '...and dropping it here.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'Stability (Sanitization) and Performance (CSS Grid) are preserved.', collapsed: false, children: [] }
+      { id: '4', text: 'Stability (Sanitization), Performance (CSS Grid), and Navigation are all active.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -213,6 +212,20 @@ export default function App() {
       if (result) return result;
     }
     return null;
+  };
+
+  // RESTORED: isDescendant Check for Drag & Drop
+  const isDescendant = (root, parentId, childId) => {
+    const parentResult = findNodeAndParent(root, parentId);
+    if (!parentResult || !parentResult.node) return false;
+    
+    let found = false;
+    const search = (node) => {
+        if (node.id === childId) found = true;
+        if (node.children && !found) node.children.forEach(search);
+    };
+    search(parentResult.node);
+    return found;
   };
 
   const findPath = (root, targetId) => {
@@ -734,13 +747,13 @@ export default function App() {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
         if (!result || !result.parent) return prev;
-        const { node, parent } = result; // FIXED: Added 'node' to destructuring
+        const { node, parent } = result;
         const index = parent.children.findIndex(c => c.id === id);
         if (index === 0) return prev;
         const prevSibling = parent.children[index - 1];
         parent.children.splice(index, 1);
         if(!prevSibling.children) prevSibling.children = [];
-        prevSibling.children.push(node); // FIXED: Using defined 'node' variable
+        prevSibling.children.push(node);
         prevSibling.collapsed = false; 
         setTimeout(() => {
             setFocusId(id);
