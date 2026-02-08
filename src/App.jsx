@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v6';
+const STORAGE_KEY = 'workflowy-clone-v7';
 
 const INITIAL_DATA = {
   id: 'root',
@@ -10,8 +10,7 @@ const INITIAL_DATA = {
   collapsed: false,
   children: [
     { id: '1', text: 'Welcome! Press Alt + / for shortcuts.', collapsed: false, children: [] },
-    { id: '2', text: 'Ctrl + Right to Zoom (Focus moves to title)', collapsed: false, children: [] },
-    { id: '3', text: 'You can now edit the Title when zoomed in!', collapsed: false, children: [] },
+    { id: '2', text: 'Focus now auto-loads at the bottom!', collapsed: false, children: [] },
   ]
 };
 
@@ -24,13 +23,42 @@ export default function App() {
   const [draggedId, setDraggedId] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
-  // --- Persistence ---
+  // --- Persistence & Initialization ---
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
+    let loadedTree = INITIAL_DATA;
+
     if (saved) {
-      try { setTree(JSON.parse(saved)); } catch (e) { console.error(e); }
+      try { loadedTree = JSON.parse(saved); } catch (e) { console.error(e); }
     }
-  }, []);
+
+    // --- AUTO-FOCUS LOGIC ---
+    // We modify the loaded tree immediately to ensure a blank line exists at the end
+    const root = loadedTree; 
+    
+    // Safety check for children array
+    if (!root.children) root.children = [];
+    
+    const lastChild = root.children[root.children.length - 1];
+    let targetId;
+
+    if (lastChild && lastChild.text === '') {
+      // Case A: Last node is already empty. Just focus it.
+      targetId = lastChild.id;
+    } else {
+      // Case B: Last node has text (or list is empty). Create new node.
+      const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+      root.children.push(newNode);
+      targetId = newNode.id;
+    }
+
+    // Set state with the (potentially modified) tree
+    setTree(loadedTree);
+    
+    // Slight delay to ensure DOM is ready for focus
+    setTimeout(() => setFocusId(targetId), 50);
+
+  }, []); // Run ONLY on mount
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tree));
@@ -39,17 +67,17 @@ export default function App() {
   // --- Focus Management ---
   useEffect(() => {
     if (focusId) {
-      // Small timeout ensures DOM is ready after a view switch
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           // Optional: Move cursor to end of text
-           // el.setSelectionRange(el.value.length, el.value.length);
+           // Ensure cursor is at the end (useful if focusing existing text)
+           el.setSelectionRange(el.value.length, el.value.length);
+           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 0);
     }
-  }, [focusId, viewRootId]); // Re-run when view changes
+  }, [focusId, viewRootId]);
 
   // --- Global Keyboard Shortcuts ---
   useEffect(() => {
@@ -67,7 +95,6 @@ export default function App() {
          handleZoomOut();
       }
     };
-    
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [tree, viewRootId, showHelp]);
@@ -132,7 +159,7 @@ export default function App() {
      const { parent } = findNodeAndParent(tree, viewRootId);
      if (parent) {
        setViewRootId(parent.id);
-       setFocusId(viewRootId); // Focus the node we just zoomed out of (the old header)
+       setFocusId(viewRootId);
      }
   };
 
@@ -140,15 +167,12 @@ export default function App() {
     const newTree = cloneTree(tree);
     const { node } = findNodeAndParent(newTree, viewRootId);
     if (!node) return;
-    
     const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-    node.children.unshift(newNode); // Add to TOP of list
-    
+    node.children.unshift(newNode);
     setTree(newTree);
     setFocusId(newNode.id);
   };
 
-  // --- Header (Title) Input Logic ---
   const handleHeaderKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -163,7 +187,7 @@ export default function App() {
     }
   };
 
-  // --- List Item Keyboard Logic ---
+  // --- List Item Logic ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const newTree = cloneTree(tree);
@@ -191,7 +215,6 @@ export default function App() {
       }
       nextFocusId = sibling.id;
     } else {
-      // If we are deleting the first child, focus goes to the Header (if zoomed)
       if (parent.id === viewRootId && viewRootId !== 'root') {
         nextFocusId = viewRootId;
       } else if (parent.id !== viewRootId) {
@@ -239,7 +262,6 @@ export default function App() {
     const newTree = cloneTree(tree);
     const { parent } = findNodeAndParent(newTree, id);
     if (!parent) return;
-    
     const index = parent.children.findIndex(c => c.id === id);
     if (direction === 'up' && index > 0) {
        const temp = parent.children[index];
@@ -266,7 +288,6 @@ export default function App() {
       if (currentIndex > 0) {
         setFocusId(flatList[currentIndex - 1].id);
       } else if (viewRootId !== 'root') {
-        // If at top of list and we are zoomed in, go to Header
         setFocusId(viewRootId);
       }
     } else if (direction === 'down') {
@@ -282,14 +303,12 @@ export default function App() {
     if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
 
-    // Ctrl + Right: Zoom In AND Focus
     if (e.ctrlKey && e.key === 'ArrowRight') {
        e.preventDefault();
        setViewRootId(node.id);
-       setFocusId(node.id); // Explicitly focus the new header
+       setFocusId(node.id);
     }
     
-    // Expand/Collapse
     if (e.ctrlKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
@@ -299,11 +318,9 @@ export default function App() {
        setCollapseState(node.id, true); 
     }
 
-    // Reorder
     if (e.shiftKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -436,10 +453,9 @@ export default function App() {
       
       <div style={styles.editor}>
         {viewRootId !== 'root' && (
-          // Editable Title Input
           <div style={styles.zoomedTitleContainer}>
              <input 
-               id={`input-${currentViewNode.id}`} // Same ID scheme for Focus Logic
+               id={`input-${currentViewNode.id}`}
                style={styles.zoomedTitleInput}
                value={currentViewNode.text}
                onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
@@ -463,7 +479,6 @@ export default function App() {
   );
 }
 
-// --- Styles ---
 const styles = {
   container: { fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px', color: '#333' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
@@ -472,11 +487,8 @@ const styles = {
   breadcrumbs: { marginBottom: '20px', fontSize: '14px', color: '#666' },
   breadcrumbLink: { cursor: 'pointer', textDecoration: 'underline', color: '#007bff' },
   editor: { background: '#fff', minHeight: '400px' },
-  
-  // New Styles for the Header Input
   zoomedTitleContainer: { marginBottom: '20px', marginLeft: '30px' },
   zoomedTitleInput: { fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent' },
-
   nodeContainer: { marginLeft: '20px', position: 'relative' },
   nodeRow: { display: 'flex', alignItems: 'center', padding: '2px 0' },
   controls: { display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' },
@@ -485,7 +497,6 @@ const styles = {
   input: { border: 'none', outline: 'none', fontSize: '16px', width: '100%', padding: '4px', background: 'transparent' },
   childrenBorder: { borderLeft: '1px solid #eee', marginLeft: '29px' },
   emptyState: { padding: '20px', color: '#aaa', cursor: 'pointer', userSelect: 'none' },
-  
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
   modalContent: { background: '#fff', padding: '30px', borderRadius: '8px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
