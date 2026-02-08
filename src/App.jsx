@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-6';
+const STORAGE_KEY = 'workflowy-clone-v13-0';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.6 (Smart Cursor Navigation)', collapsed: false, children: [] },
-      { id: '2', text: 'Arrow Up/Down now behaves intelligently:', collapsed: false, children: [
-         { id: '2-1', text: 'If you are in the middle of text, arrows move the cursor.', collapsed: false, children: [] },
-         { id: '2-2', text: 'If you are at the start/end, arrows jump to the next node.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.0 (Perfect Cursor Positioning)', collapsed: false, children: [] },
+      { id: '2', text: 'Click anywhere in this sentence - the cursor will land exactly where you click.', collapsed: false, children: [] },
+      { id: '3', text: 'Search works perfectly via the "Ghost Overlay" technique:', collapsed: false, children: [
+         { id: '3-1', text: 'Search "Ghost" to see the highlight appear BEHIND the text.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Editing remains silky smooth.', collapsed: false, children: [] }
       ]},
-      { id: '3', text: 'Try it! Click here and press Up/Down.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -204,11 +204,11 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           if (el.tagName === 'TEXTAREA') {
-             // We do NOT force cursor position here to allow native up/down landing
-             // unless it's a fresh focus event (handled by user click or enter)
-             adjustHeight(el);
-           }
+           if (el.tagName === 'TEXTAREA') adjustHeight(el);
+           // NOTE: We intentionally REMOVED the setSelectionRange logic here for existing nodes
+           // This allows the browser's native click placement to work for mouse users.
+           // For keyboard navigation, we handle cursor logic in the handlers or it defaults to end.
+           
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -220,7 +220,7 @@ export default function App() {
              if (headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
            }
         }
-      }, 50);
+      }, 0); // Fast timeout for responsiveness
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
@@ -291,29 +291,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const isDescendant = (tree, sourceId, targetId) => {
-    const sourceResult = findNodeAndParent(tree, sourceId);
-    if (!sourceResult) return false;
-    const { node: sourceNode } = sourceResult;
-    const findInSubtree = (n) => {
-      if (n.id === targetId) return true;
-      return n.children && n.children.some(findInSubtree);
-    };
-    return sourceNode.children && sourceNode.children.some(findInSubtree);
-  };
-
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
-  };
-
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -323,14 +300,10 @@ export default function App() {
     }
   };
 
-  const handleBlur = (id) => {
-    const newTree = cloneTree(tree);
-    const result = findNodeAndParent(newTree, id);
-    if (result && result.node) {
-      if (result.node.text.trim() === '' && result.node.children && result.node.children.length > 0) {
-        result.node.text = "...";
-        setTree(newTree);
-      }
+  const handleFocus = (id) => {
+    if (focusId !== id) {
+      setFocusId(id);
+      // We do NOT increment focusTrigger here to avoid fighting the browser's native cursor placement
     }
   };
 
@@ -419,6 +392,7 @@ export default function App() {
     result.node.children.unshift(newNode);
     setTree(newTree);
     setFocusId(newNode.id);
+    setFocusTrigger(t => t + 1); // Force cursor to new node
   };
 
   const handleHeaderKeyDown = (e) => {
@@ -431,6 +405,7 @@ export default function App() {
       const result = findNodeAndParent(tree, viewRootId);
       if (result && result.node && result.node.children.length > 0) {
         setFocusId(result.node.children[0].id);
+        setFocusTrigger(t => t + 1);
       }
     }
   };
@@ -470,6 +445,7 @@ export default function App() {
     parent.children.splice(index + 1, 0, newNode);
     setTree(newTree);
     setFocusId(newNode.id);
+    setFocusTrigger(t => t + 1);
   };
 
   const handleBackspace = (e, id, text) => {
@@ -501,7 +477,10 @@ export default function App() {
     }
     parent.children.splice(index, 1);
     setTree(newTree);
-    if (nextFocusId) setFocusId(nextFocusId);
+    if (nextFocusId) {
+        setFocusId(nextFocusId);
+        setFocusTrigger(t => t + 1);
+    }
   };
 
   const handleTab = (e, id) => {
@@ -578,12 +557,11 @@ export default function App() {
   };
 
   const handleArrow = (e, id, direction) => {
-    // SMART NAVIGATION: Only navigate if at text boundary
     const el = e.target;
     if (el) {
       const { selectionStart, value } = el;
-      if (direction === 'up' && selectionStart > 0) return; // Allow cursor to move up in text
-      if (direction === 'down' && selectionStart < value.length) return; // Allow cursor to move down in text
+      if (direction === 'up' && selectionStart > 0) return; 
+      if (direction === 'down' && selectionStart < value.length) return; 
     }
 
     e.preventDefault();
@@ -634,7 +612,6 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Standard Arrow Navigation with Smart Boundary Check
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -731,6 +708,7 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
+    // Common text styles for perfect alignment
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
@@ -767,30 +745,36 @@ export default function App() {
              >•</span>
           </div>
           
-          <div style={{ flex: 1, position: 'relative' }}>
-            {isEditing ? (
-              <textarea
-                ref={el => { if(el && isEditing) adjustHeight(el); }}
-                id={`input-${node.id}`}
-                value={node.text}
-                onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
-                onKeyDown={(e) => handleItemKeyDown(e, node)}
-                onBlur={() => handleBlur(node.id)}
-                rows={1}
-                style={{
-                  ...commonTextStyle,
-                  border: 'none', outline: 'none', background: 'transparent', color: theme.fg,
-                  resize: 'none', overflow: 'hidden'
-                }} 
-              />
-            ) : (
-              <div 
-                onClick={() => setFocusId(node.id)}
-                style={{ ...commonTextStyle, cursor: 'text' }}
-              >
-                <HighlightedText text={node.text} query={searchQuery} />
-              </div>
-            )}
+          <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
+            {/* Layer 1: Highlight Overlay (Behind) */}
+            <div style={{
+               ...commonTextStyle,
+               gridArea: '1 / 1',
+               visibility: searchQuery ? 'visible' : 'hidden',
+               pointerEvents: 'none', // Allow clicks to pass through to textarea
+               color: 'transparent' // Hide the main text, show only background colors
+            }}>
+               <HighlightedText text={node.text} query={searchQuery} />
+            </div>
+
+            {/* Layer 2: Interactive Textarea (Front) */}
+            <textarea
+              ref={el => { if(el && isEditing) adjustHeight(el); }}
+              id={`input-${node.id}`}
+              value={node.text}
+              onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
+              onKeyDown={(e) => handleItemKeyDown(e, node)}
+              onFocus={() => handleFocus(node.id)} 
+              rows={1}
+              style={{
+                ...commonTextStyle,
+                gridArea: '1 / 1',
+                border: 'none', outline: 'none', background: 'transparent', 
+                resize: 'none', overflow: 'hidden',
+                color: searchQuery ? 'transparent' : theme.fg, // Transparent text if searching
+                caretColor: theme.fg // Cursor always visible
+              }} 
+            />
           </div>
         </div>
         {!node.collapsed && (
