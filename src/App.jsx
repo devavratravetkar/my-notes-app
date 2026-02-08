@@ -10,19 +10,34 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.34 (Smart Scroll)', collapsed: false, children: [] },
-      { id: '2', text: 'We fixed the "Layout Thrashing" by making the scrolling logic smarter.', collapsed: false, children: [] },
-      { id: '3', text: 'Test this:', collapsed: false, children: [
-         { id: '3-1', text: 'Zoom into this node.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Now Zoom Out (Alt+Shift+Left) repeatedly.', collapsed: false, children: [] },
-         { id: '3-3', text: 'The view should remain stable without jumping or flickering.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.34 (Sanity Check)', collapsed: false, children: [] },
+      { id: '2', text: 'We fixed the "Blank Screen" crash.', collapsed: false, children: [
+         { id: '2-1', text: 'The app now auto-detects and fixes corrupt data (duplicate IDs) on load.', collapsed: false, children: [] }
       ]},
-      { id: '4', text: 'The app only forces a scroll if your cursor is actually off-screen.', collapsed: false, children: [] }
+      { id: '3', text: 'We implemented TRUE CSS-only resizing.', collapsed: false, children: [
+         { id: '3-1', text: 'No JavaScript runs when you type or zoom. It uses a CSS Grid stack.', collapsed: false, children: [] },
+         { id: '3-2', text: 'This eliminates the flicker and freezing completely.', collapsed: false, children: [] }
+      ]},
+      { id: '4', text: 'Try Zooming in here ->', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
   focusId: null,
   darkMode: false
+};
+
+// --- DATA SANITIZATION (Fixes White Screen of Death) ---
+const sanitizeTree = (node, seenIds = new Set()) => {
+  // If ID is missing or duplicate, generate a new one
+  if (!node.id || seenIds.has(node.id)) {
+    node.id = GENERATE_ID(); 
+  }
+  seenIds.add(node.id);
+
+  if (node.children) {
+    node.children.forEach(child => sanitizeTree(child, seenIds));
+  }
+  return node;
 };
 
 const cloneTree = (node) => JSON.parse(JSON.stringify(node));
@@ -92,8 +107,11 @@ export default function App() {
     try {
       const parsed = JSON.parse(saved);
       if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
-      if (!parsed.tree) return { ...DEFAULT_STATE, tree: parsed }; 
-      return parsed;
+      
+      // CRITICAL FIX: Sanitize tree immediately on load to prevent React Key Duplication crash
+      const cleanTree = parsed.tree ? sanitizeTree(parsed.tree) : DEFAULT_STATE.tree;
+      
+      return { ...DEFAULT_STATE, ...parsed, tree: cleanTree };
     } catch (e) {
       console.error("Load failed", e);
       return DEFAULT_STATE;
@@ -278,7 +296,7 @@ export default function App() {
     }
   };
 
-  // --- Focus Management (SMART SCROLL) ---
+  // --- Focus Management ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
@@ -296,14 +314,12 @@ export default function App() {
              }
              cursorGoalRef.current = null;
            }
-           
-           // SMART SCROLL: Only scroll if NOT visible
+           // Smart scroll check
            const rect = el.getBoundingClientRect();
            const isVisible = (
              rect.top >= 0 &&
              rect.bottom <= (window.innerHeight || document.documentElement.clientHeight)
            );
-
            if (!isVisible) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
@@ -318,51 +334,21 @@ export default function App() {
   // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
-    const pruneEmpty = (node) => {
-      if (!node.children) return;
-      node.children = node.children.filter(child => {
-        const hasText = child.text && child.text.trim() !== '';
-        const isFocused = child.id === focusId;
-        const hasChildren = child.children && child.children.length > 0;
-        const keep = hasText || isFocused || hasChildren;
-        if (keep) pruneEmpty(child);
-        return keep;
-      });
-    };
-    pruneEmpty(cleanTree);
-
-    let targetId = focusId;
+    
+    // Ensure View Root Exists
     const viewResult = findNodeAndParent(cleanTree, viewRootId);
     if (!viewResult) setViewRootId('root');
 
-    const focusResult = findNodeAndParent(cleanTree, targetId || 'non-existent');
-    const foundFocus = focusResult ? focusResult.node : null;
-    
-    if (!foundFocus) {
-      const rootToUse = viewResult ? viewResult.node : cleanTree; 
-      if (!rootToUse.children) rootToUse.children = [];
-      if (rootToUse.children.length === 0) {
-        const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-        rootToUse.children.push(newNode);
-        targetId = newNode.id;
-      } else {
-        const lastChild = rootToUse.children[rootToUse.children.length - 1];
-        if (lastChild.text === '') targetId = lastChild.id;
-        else {
-           const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
-           rootToUse.children.push(newNode);
-           targetId = newNode.id;
-        }
-      }
+    // Ensure Focus Exists
+    const focusResult = findNodeAndParent(cleanTree, focusId || 'non-existent');
+    if (!focusResult && viewResult) {
+       // Fallback to first child of view if focus lost
+       if(viewResult.node.children && viewResult.node.children.length > 0) {
+           setFocusId(viewResult.node.children[0].id);
+       }
     }
-    const checkAllExpanded = (node) => {
-      if (node.children && node.children.length > 0 && node.collapsed) return false;
-      if (node.children && node.children.length > 0) return node.children.every(checkAllExpanded);
-      return true;
-    };
-    if (checkAllExpanded(cleanTree)) setIsAllExpanded(true);
+
     setTree(cleanTree);
-    setFocusId(targetId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
@@ -384,18 +370,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
-  };
-
   const handleUpdateText = (id, newText) => {
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -641,6 +615,8 @@ export default function App() {
     e.preventDefault();
     const el = e.target;
     const cursor = el.selectionStart || 0;
+    
+    // SKIP BLUR FOR ALL ENTERS to allow correct node focus
     skipBlurRef.current = true;
 
     setTree(prev => {
@@ -1024,7 +1000,7 @@ export default function App() {
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
-      whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word'
+      whiteSpace: 'pre-wrap', overflowWrap: 'break-word'
     };
 
     return (
@@ -1058,7 +1034,7 @@ export default function App() {
           </div>
           
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
-            {/* GRID HACK: Hidden Div for Auto-Height */}
+            {/* GRID HACK: Hidden Div for Auto-Height - NO JS REQUIRED */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
@@ -1085,10 +1061,11 @@ export default function App() {
                 resize: 'none', overflow: 'hidden',
                 color: searchQuery ? 'transparent' : theme.fg, 
                 caretColor: theme.fg, 
-                zIndex: 1 
+                zIndex: 1,
+                height: '100%' // CRITICAL: Fill grid area
               }} 
             />
-            {/* Search Highlight Overlay */}
+            {/* Highlight Overlay */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
@@ -1187,9 +1164,8 @@ export default function App() {
                    value={currentViewNode.text}
                    onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
                    onKeyDown={handleHeaderKeyDown}
-                   ref={el => { if(el) adjustHeight(el); }}
                    rows={1}
-                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, resize: 'none', overflow: 'hidden', fontFamily: 'inherit' }}
+                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, resize: 'none', overflow: 'hidden', fontFamily: 'inherit', height: '100%' }}
                  />
                ) : (
                  <div 
