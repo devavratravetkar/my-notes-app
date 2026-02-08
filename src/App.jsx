@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v11-1';
+const STORAGE_KEY = 'workflowy-clone-v11-2';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v11.1 (Polished UI)', collapsed: false, children: [] },
-      { id: '2', text: 'Search for "apple" below to test the new highlighting.', collapsed: false, children: [] },
-      { id: '3', text: 'Container Node (Try searching "apple")', collapsed: false, children: [
-         { id: '3-1', text: 'I am not a match, so I will fade.', collapsed: false, children: [] },
-         { id: '3-2', text: 'apple (I am a match! I stay 100% opaque)', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v11.2 (Enhanced Search)', collapsed: false, children: [] },
+      { id: '2', text: 'Search is now easier to exit.', collapsed: false, children: [] },
+      { id: '3', text: 'Try searching "Item":', collapsed: false, children: [
+         { id: '3-1', text: 'Item 1', collapsed: false, children: [] },
+         { id: '3-2', text: 'Item 2', collapsed: false, children: [] }
       ]},
+      { id: '4', text: 'Use Up/Down in search to pick one, hit Enter to edit it.', collapsed: false, children: [] },
     ]
   },
   viewRootId: 'root',
@@ -124,22 +125,45 @@ export default function App() {
     setCurrentMatchIndex(0); 
   }, [searchQuery]); 
 
-  // --- Search Navigation ---
+  // --- Search Actions ---
+  const clearSearch = () => {
+    setSearchQuery('');
+    setMatchIds([]);
+    setCurrentMatchIndex(-1);
+    if (searchInputRef.current) searchInputRef.current.blur();
+    // Return focus to the view root (or last focused item if possible)
+    setFocusId(viewRootId);
+    setFocusTrigger(t => t + 1);
+  };
+
+  // --- Search Navigation Handlers ---
   const handleSearchKeyDown = (e) => {
+    // Escape: Always clear search
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      clearSearch();
+      return;
+    }
+
     if (matchIds.length === 0) return;
 
-    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
+      // Cycle Forward
       const nextIndex = (currentMatchIndex + 1) % matchIds.length;
       setCurrentMatchIndex(nextIndex);
-      if (e.key === 'Enter') {
-        setFocusId(matchIds[nextIndex]);
-        setFocusTrigger(t => t + 1);
-      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      // Cycle Backward
       const nextIndex = (currentMatchIndex - 1 + matchIds.length) % matchIds.length;
       setCurrentMatchIndex(nextIndex);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      // Jump Focus to Selection
+      if (currentMatchIndex >= 0 && currentMatchIndex < matchIds.length) {
+        setFocusId(matchIds[currentMatchIndex]);
+        setFocusTrigger(t => t + 1);
+      }
     }
   };
 
@@ -648,13 +672,12 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // FIX: Apply opacity here to the row only, NOT the wrapper
     return (
       <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg }}>
         <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0', 
                       background: isSelectedMatch ? (darkMode ? '#333' : '#fff8dc') : 'transparent',
                       borderRadius: '4px',
-                      opacity: isDimmed ? 0.25 : 1 // Opacity moved here!
+                      opacity: isDimmed ? 0.25 : 1
         }}>
           <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' }}>
              <span 
@@ -716,10 +739,8 @@ export default function App() {
   const currentViewNode = viewResult.node;
 
   return (
-    // Outer Container for Full-Screen Background
     <div style={{ backgroundColor: theme.bg, minHeight: '100vh', color: theme.fg, transition: 'background-color 0.2s' }}>
       
-      {/* Centered Content Container */}
       <div style={{ fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto', padding: '40px' }}>
         
         {/* Header */}
@@ -734,11 +755,24 @@ export default function App() {
               placeholder="Search... (Ctrl + /)"
               style={{
                 background: theme.inputBg, border: `1px solid ${theme.border}`, color: theme.fg,
-                padding: '6px 10px', borderRadius: '4px', width: '220px', outline: 'none'
+                padding: '6px 30px 6px 10px', borderRadius: '4px', width: '220px', outline: 'none'
               }}
             />
-            {matchIds.length > 0 && (
-              <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
+            {searchQuery && (
+              <button 
+                onClick={clearSearch}
+                style={{
+                  position: 'absolute', right: '5px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', color: theme.dim, cursor: 'pointer', fontSize: '16px'
+                }}
+              >×</button>
+            )}
+            {matchIds.length > 0 && !searchQuery && (
+               /* Should usually not happen if cleared, but for safety */
+               null
+            )}
+            {matchIds.length > 0 && searchQuery && (
+              <div style={{ position: 'absolute', right: '30px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: theme.dim }}>
                 {currentMatchIndex + 1}/{matchIds.length}
               </div>
             )}
