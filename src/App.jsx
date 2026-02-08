@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-11';
+const STORAGE_KEY = 'workflowy-clone-v13-12';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.11 (Auto-Resize Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Paste a long paragraph here and hit Enter in the middle.', collapsed: false, children: [] },
-      { id: '3', text: 'The text moves down, and the original node instantly shrinks. No more ghost space!', collapsed: false, children: [
-         { id: '3-1', text: 'Empty node stacking protection is active.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Rapid Backspace Merging is active.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.12 (Smart Merge & Cleanup)', collapsed: false, children: [] },
+      { id: '2', text: 'Try hitting Backspace at the start of this line.', collapsed: false, children: [] },
+      { id: '3', text: 'It will merge with the line above, adding a single space automatically.', collapsed: false, children: [
+         { id: '3-1', text: 'Now try hitting Enter at the start of a line to push text down.', collapsed: false, children: [] },
+         { id: '3-2', text: 'If you click away immediately, the empty gap will be cleaned up automatically.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -324,6 +324,7 @@ export default function App() {
     }
   };
 
+  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -334,12 +335,26 @@ export default function App() {
       result.node.text = text;
 
       const hasChildren = result.node.children && result.node.children.length > 0;
+      
+      // 1. Check CURRENT node: If empty and no children, delete it.
       if (text === '' && !hasChildren && result.parent) {
          const idx = result.parent.children.findIndex(c => c.id === id);
          if (idx !== -1) {
              result.parent.children.splice(idx, 1);
          }
+      } 
+      // 2. Check PREVIOUS node (The "Ghost Node" Fix): 
+      // If the node ABOVE is empty/childless, it was likely an abandoned spacer. Delete it.
+      else if (result.parent) {
+         const idx = result.parent.children.findIndex(c => c.id === id);
+         if (idx > 0) {
+             const prevNode = result.parent.children[idx - 1];
+             if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) {
+                 result.parent.children.splice(idx - 1, 1);
+             }
+         }
       }
+      
       setTree(newTree);
     }
   };
@@ -488,7 +503,6 @@ export default function App() {
     const nodeInNewTree = resultInNewTree.node;
 
     if (cursor === 0) {
-        // Prevent stacking empty nodes above
         if (index > 0) {
             const prevNode = parentInNewTree.children[index - 1];
             if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return;
@@ -536,13 +550,22 @@ export default function App() {
     
     if (index > 0) {
       const prevSibling = parent.children[index - 1];
+      let cursorTarget = prevSibling.text.length; // Default join point
+      
+      // SMART SPACE MERGE
+      // Add space if previous doesn't end with one, and current doesn't start with one
+      // And both parts are non-empty
+      if (prevSibling.text.length > 0 && node.text.length > 0 && !prevSibling.text.endsWith(' ') && !node.text.startsWith(' ')) {
+          prevSibling.text += " ";
+          cursorTarget += 1; // Move cursor after the inserted space
+      }
       
       prevSibling.text += node.text;
       parent.children.splice(index, 1);
       
       setTree(newTree);
       setFocusId(prevSibling.id);
-      cursorGoalRef.current = 0; // Rapid Merge Cursor
+      cursorGoalRef.current = cursorTarget; // Set cursor exactly after space
       setFocusTrigger(t => t + 1);
     } else {
       if (parent.id !== viewRootId) {
