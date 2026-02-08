@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-24';
+const STORAGE_KEY = 'workflowy-clone-v13-25';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,14 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.24 (Focus Rescue)', collapsed: false, children: [] },
-      { id: '2', text: 'Test Scenario:', collapsed: false, children: [
-         { id: '2-1', text: 'Expand this list completely.', collapsed: false, children: [
-             { id: '2-1-1', text: 'Place your cursor HERE.', collapsed: false, children: [] }
-         ]}
-      ]},
-      { id: '3', text: 'Now click "Collapse All" (or press Alt+Shift+Up).', collapsed: false, children: [] },
-      { id: '4', text: 'The cursor will jump safely to "Test Scenario" instead of disappearing.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.25 (Insert Before & Focus)', collapsed: false, children: [] },
+      { id: '2', text: 'Place cursor at the START of this line and hit Enter.', collapsed: false, children: [] },
+      { id: '3', text: 'It creates a new node above AND focuses it immediately, so you can type.', collapsed: false, children: [] },
+      { id: '4', text: 'All previous features (Sanitizer, Rescue, Context Moves) are preserved.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -126,7 +122,6 @@ export default function App() {
     return null;
   };
 
-  // Helper to find full path to a node (for focus rescue)
   const findPath = (root, targetId) => {
     if (root.id === targetId) return [root];
     if (root.children) {
@@ -341,6 +336,7 @@ export default function App() {
     });
   };
 
+  // --- CLEANUP LOGIC ON BLUR ---
   const handleBlur = (id) => {
     if (skipBlurRef.current) {
       skipBlurRef.current = false;
@@ -350,6 +346,7 @@ export default function App() {
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
+        
         if (!result || !result.node) return prev;
 
         if (result && result.node) {
@@ -359,9 +356,12 @@ export default function App() {
             result.node.text = text;
 
             const hasChildren = result.node.children && result.node.children.length > 0;
+            
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
-                if (idx !== -1) result.parent.children.splice(idx, 1);
+                if (idx !== -1) {
+                    result.parent.children.splice(idx, 1);
+                }
             } else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
@@ -379,13 +379,12 @@ export default function App() {
   const handleToggleCollapse = (e, id) => {
     e && e.stopPropagation();
     
-    // FOCUS RESCUE: Check if we are hiding the focused node
+    // FOCUS RESCUE
     let rescueFocusId = null;
     if (focusId) {
         const path = findPath(tree, focusId);
-        // If the path contains the node being collapsed (id), and it's not the focused node itself
         if (path && path.some(n => n.id === id) && id !== focusId) {
-            rescueFocusId = id; // Set focus to the parent being collapsed
+            rescueFocusId = id;
         }
     }
 
@@ -406,7 +405,6 @@ export default function App() {
   };
   
   const setCollapseState = (id, shouldCollapse) => {
-    // FOCUS RESCUE for Alt+Up/Down
     let rescueFocusId = null;
     if (shouldCollapse && focusId) {
         const path = findPath(tree, focusId);
@@ -448,19 +446,15 @@ export default function App() {
   };
 
   const handleCollapseAll = () => {
-    // FOCUS RESCUE: "Collapse All" hides almost everything.
-    // We need to move focus to the visible ancestor (child of viewRoot)
     let rescueFocusId = null;
     if (focusId) {
         const path = findPath(tree, focusId);
         if (path) {
-            // Find the node in the path that is a direct child of viewRootId
-            // OR if viewRootId is root, a direct child of root.
             const viewRootIndex = path.findIndex(n => n.id === viewRootId);
             if (viewRootIndex !== -1 && viewRootIndex + 1 < path.length) {
                 rescueFocusId = path[viewRootIndex + 1].id;
             } else if (viewRootId === 'root' && path.length > 1) {
-                rescueFocusId = path[1].id; // path[0] is root
+                rescueFocusId = path[1].id; 
             }
         }
     }
@@ -578,6 +572,8 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
+    // Only skip blur if Splitting/Moving Down.
+    // If inserting ABOVE, we are SWITCHING focus, so the current node will blur naturally.
     if (cursor > 0) {
         skipBlurRef.current = true;
     }
@@ -601,13 +597,23 @@ export default function App() {
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
+            // INSERT ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
             }
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
+            
+            // FOCUS NEW NODE
+            setTimeout(() => {
+                setFocusId(newNode.id);
+                cursorGoalRef.current = 'start';
+                setFocusTrigger(t => t + 1);
+            }, 0);
+
         } else if (shouldSplitIntoChild) {
+            // SPLIT TO CHILD
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -620,6 +626,7 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
+            // SPLIT TO SIBLING
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -818,7 +825,7 @@ export default function App() {
 
     e.preventDefault();
     
-    // ACTIVE SANITIZATION: Update state immediately on navigation
+    // ACTIVE SANITIZATION on Navigation
     setTree(prev => {
         const newTree = cloneTree(prev);
         const res = findNodeAndParent(newTree, id);
@@ -1030,7 +1037,7 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el && isEditing) adjustHeight(el); }}
+              ref={el => { if(el) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
