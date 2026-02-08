@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v3';
+const STORAGE_KEY = 'workflowy-clone-v4';
 
 const INITIAL_DATA = {
   id: 'root',
@@ -38,20 +38,6 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tree));
   }, [tree]);
 
-  // --- Global Keyboard Shortcuts (Help) ---
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
-        setShowHelp(prev => !prev);
-      }
-      if (e.key === 'Escape' && showHelp) {
-        setShowHelp(false);
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [showHelp]);
-
   // --- Focus Management ---
   useEffect(() => {
     if (focusId) {
@@ -59,6 +45,32 @@ export default function App() {
       if (el) el.focus();
     }
   }, [focusId, tree]);
+
+  // --- Global Keyboard Shortcuts ---
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      // 1. Help Toggle
+      if (e.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+        setShowHelp(prev => !prev);
+      }
+      if (e.key === 'Escape') setShowHelp(false);
+
+      // 2. Handle "Enter" on Empty Page (The Fix)
+      // We check if we are currently viewing a node that has NO children
+      if (e.key === 'Enter') {
+        const { node: currentViewNode } = findNodeAndParent(tree, viewRootId);
+        // If list is empty, Create first child
+        if (currentViewNode && currentViewNode.children.length === 0) {
+          e.preventDefault();
+          handleAddFirstChild();
+        }
+      }
+    };
+    
+    // We attach this listener to the window so it works even if no input is focused
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [tree, viewRootId, showHelp]); // Re-bind when tree/view changes
 
   // --- Helpers ---
   const findNodeAndParent = (root, targetId, parent = null) => {
@@ -106,6 +118,19 @@ export default function App() {
     const { node } = findNodeAndParent(newTree, id);
     if (node) node.collapsed = !node.collapsed;
     setTree(newTree);
+  };
+
+  // NEW: Helper to add the very first child to a node
+  const handleAddFirstChild = () => {
+    const newTree = cloneTree(tree);
+    const { node } = findNodeAndParent(newTree, viewRootId);
+    if (!node) return;
+    
+    const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+    node.children.push(newNode);
+    
+    setTree(newTree);
+    setFocusId(newNode.id);
   };
 
   const handleEnter = (e, id) => {
@@ -218,7 +243,6 @@ export default function App() {
       <div key={node.id} style={styles.nodeContainer}>
         <div style={styles.nodeRow}>
           <div style={styles.controls}>
-             {/* FIXED: Style block formatted for safety */}
              <span 
                style={{
                  ...styles.toggle, 
@@ -227,7 +251,6 @@ export default function App() {
                }}
                onClick={(e) => handleToggleCollapse(e, node.id)}
              >▼</span>
-             
              <span 
                style={styles.bullet} 
                onClick={() => setViewRootId(node.id)}
@@ -315,8 +338,19 @@ export default function App() {
       
       <div style={styles.editor}>
         {viewRootId !== 'root' && <h2 style={styles.zoomedTitle}>{currentViewNode.text}</h2>}
+        
+        {/* Render Children */}
         {currentViewNode.children.map(child => renderNode(child))}
-        {currentViewNode.children.length === 0 && <div style={styles.emptyState}><em>Empty. Press Enter to add items.</em></div>}
+        
+        {/* Empty State / Add Area */}
+        {currentViewNode.children.length === 0 && (
+           <div 
+             style={styles.emptyState} 
+             onClick={handleAddFirstChild}
+           >
+             <em>Empty. Click here or press Enter to add items.</em>
+           </div>
+        )}
       </div>
 
       {showHelp && renderShortcutsModal()}
@@ -341,7 +375,9 @@ const styles = {
   bullet: { cursor: 'move', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555', userSelect: 'none', fontSize: '20px', lineHeight: '1' },
   input: { border: 'none', outline: 'none', fontSize: '16px', width: '100%', padding: '4px', background: 'transparent' },
   childrenBorder: { borderLeft: '1px solid #eee', marginLeft: '29px' },
-  emptyState: { padding: '20px', color: '#aaa' },
+  
+  // Updated Empty State to look clickable
+  emptyState: { padding: '20px', color: '#aaa', cursor: 'pointer', userSelect: 'none' },
   
   // Modal Styles
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
