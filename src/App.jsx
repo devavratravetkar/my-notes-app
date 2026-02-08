@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-18';
+const STORAGE_KEY = 'workflowy-clone-v13-20';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,10 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.18 (Cleanup Logic Fixed)', collapsed: false, children: [] },
-      { id: '2', text: 'Try creating spacers (Enter at start) and clicking away.', collapsed: false, children: [] },
-      { id: '3', text: 'The empty nodes will now properly auto-delete on blur.', collapsed: false, children: [] },
-      { id: '4', text: 'Backspace Merge adds a space between words properly.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.20 (Whitespace Sanitizer Restored)', collapsed: false, children: [] },
+      { id: '2', text: 'Test 1: Add bunch of Shift+Enter newlines here.\n\n\n\n', collapsed: false, children: [] },
+      { id: '3', text: 'Test 2: Now press Arrow Down.', collapsed: false, children: [
+         { id: '3-1', text: 'The node above should snap shut (removing excess whitespace) instantly.', collapsed: false, children: [] }
+      ]},
     ]
   },
   viewRootId: 'root',
@@ -335,22 +336,26 @@ export default function App() {
     setTree(prev => {
         const newTree = cloneTree(prev);
         const result = findNodeAndParent(newTree, id);
+        
+        if (!result || !result.node) return prev;
+
         if (result && result.node) {
             let text = result.node.text;
+            // SANITIZER: Trim and collapse gaps
             text = text.trim();
             text = text.replace(/\n{3,}/g, '\n\n');
             result.node.text = text;
 
             const hasChildren = result.node.children && result.node.children.length > 0;
             
-            // 1. Delete CURRENT if empty
+            // Delete CURRENT if empty & childless
             if (text === '' && !hasChildren && result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx !== -1) {
                     result.parent.children.splice(idx, 1);
                 }
             } 
-            // 2. Delete PREVIOUS if empty (The "Ghost Node" fix)
+            // Delete PREVIOUS if empty & childless (Spacer Cleanup)
             else if (result.parent) {
                 const idx = result.parent.children.findIndex(c => c.id === id);
                 if (idx > 0) {
@@ -513,9 +518,8 @@ export default function App() {
     const el = e.target;
     const cursor = el.selectionStart || 0;
 
-    // FIX: Only skip blur if we are changing focus (Split/Insert Child).
-    // If inserting above (spacer), we KEEP focus, so we must NOT skip blur
-    // (so the next legitimate blur cleans up properly).
+    // Only skip blur if moving focus to CHILD/SIBLING.
+    // If inserting ABOVE (Spacer), we stay put, so we allow blur to happen later.
     if (cursor > 0) {
         skipBlurRef.current = true;
     }
@@ -526,8 +530,6 @@ export default function App() {
         if (!currentResult || !currentResult.node) return prev;
         
         if (currentResult.node.text === '') {
-            // Emulate Shift+Tab if empty
-            // (Simplified: just return for now, user can Shift+Tab manually)
             return prev;
         }
 
@@ -541,16 +543,13 @@ export default function App() {
         const shouldSplitIntoChild = cursor > 0 && nodeInNewTree.children && nodeInNewTree.children.length > 0 && !nodeInNewTree.collapsed;
 
         if (cursor === 0) {
-            // Insert Empty Node ABOVE
             if (index > 0) {
                 const prevNode = parentInNewTree.children[index - 1];
                 if (prevNode.text.trim() === '' && (!prevNode.children || prevNode.children.length === 0)) return prev;
             }
             const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
             parentInNewTree.children.splice(index, 0, newNode);
-            // No focus change -> Don't touch skipBlurRef (it stays false)
         } else if (shouldSplitIntoChild) {
-            // Split into Child
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -563,7 +562,6 @@ export default function App() {
                 setFocusTrigger(t => t + 1);
             }, 0);
         } else {
-            // Split into Sibling
             const textBefore = text.slice(0, cursor);
             const textAfter = text.slice(cursor);
             nodeInNewTree.text = textBefore;
@@ -585,7 +583,7 @@ export default function App() {
     if (el.selectionStart > 0) return;
 
     e.preventDefault();
-    skipBlurRef.current = true;
+    skipBlurRef.current = true; // DELETE must skip blur
 
     setTree(prev => {
         const newTree = cloneTree(prev);
@@ -761,7 +759,7 @@ export default function App() {
     }
 
     e.preventDefault();
-    skipBlurRef.current = true;
+    // NO skipBlurRef here. We WANT blur to clean up whitespace.
     
     const result = findNodeAndParent(tree, viewRootId);
     if(!result) return;
@@ -965,7 +963,7 @@ export default function App() {
             </div>
 
             <textarea
-              ref={el => { if(el) adjustHeight(el); }}
+              ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
@@ -1115,7 +1113,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
-                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete (Merge)</span></div>
+                <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
               </div>
             </div>
           </div>
