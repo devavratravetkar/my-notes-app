@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-5';
+const STORAGE_KEY = 'workflowy-clone-v13-6';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.5 (Split on Enter)', collapsed: false, children: [] },
-      { id: '2', text: 'Place your cursor in the middle of this long sentence and hit Enter.', collapsed: false, children: [] },
-      { id: '3', text: 'It should split this node into two separate nodes seamlessly.', collapsed: false, children: [
-         { id: '3-1', text: 'Works at the start of a line too (pushes text down).', collapsed: false, children: [] },
-         { id: '3-2', text: 'Works at the end of a line (standard new item).', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.6 (Whitespace Sanitizer)', collapsed: false, children: [] },
+      { id: '2', text: 'Try hitting Shift+Enter multiple times at the end of this line, then click away.', collapsed: false, children: [] },
+      { id: '3', text: 'The app now automatically trims "meaningless" trailing whitespace on blur.', collapsed: false, children: [
+         { id: '3-1', text: 'It also collapses huge internal gaps (3+ lines) down to just one blank line.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -323,15 +322,29 @@ export default function App() {
     }
   };
 
+  // --- IMPROVED BLUR HANDLER (Sanitizer) ---
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
     if (result && result.node) {
+      let text = result.node.text;
+      
+      // 1. Trim trailing/leading whitespace
+      text = text.trim();
+      
+      // 2. Collapse excessive internal newlines (3+ becomes 2)
+      // This allows max 1 blank line between paragraphs
+      text = text.replace(/\n{3,}/g, '\n\n');
+      
+      result.node.text = text;
+
+      // 3. Safety Lock for empty parents
       const hasChildren = result.node.children && result.node.children.length > 0;
-      if (result.node.text.trim() === '' && hasChildren) {
+      if (text === '' && hasChildren) {
         result.node.text = "...";
-        setTree(newTree);
       }
+      
+      setTree(newTree);
     }
   };
 
@@ -461,46 +474,40 @@ export default function App() {
     setFocusTrigger(t => t + 1);
   };
 
-  // --- SPLIT ON ENTER IMPLEMENTATION ---
   const handleEnter = (e, id) => {
     e.preventDefault();
     const currentResult = findNodeAndParent(tree, id);
-    
-    // Safety check for root/null
     if (!currentResult || !currentResult.node) return;
     
+    // Check if node is empty -> Shift+Tab functionality
+    if (currentResult.node.text === '') {
+       handleShiftTab(e, id);
+       return;
+    }
+
     const { node, parent } = currentResult;
     const index = parent.children.findIndex(c => c.id === id);
-    
-    // Get cursor position for splitting
-    const el = e.target; // The textarea
+    const el = e.target;
     const cursor = el.selectionStart || 0;
     const text = node.text || '';
     
+    // SPLIT LOGIC
     const textBefore = text.slice(0, cursor);
     const textAfter = text.slice(cursor);
-
-    if (textBefore.trim() === '' && textAfter.trim() === '' && node.children.length === 0) {
-        // Just indent if empty? Or standard outliner "Tab" logic?
-        // Actually for empty node, Shift+Tab is standard if at depth, otherwise just do nothing or insert new.
-        // We'll stick to basic new node logic but optimized.
-    }
 
     const newTree = cloneTree(tree);
     const resultInNewTree = findNodeAndParent(newTree, id);
     const parentInNewTree = resultInNewTree.parent;
     const nodeInNewTree = resultInNewTree.node;
 
-    // UPDATE Current Node Text
     nodeInNewTree.text = textBefore;
 
-    // CREATE New Node with trailing text
     const newNode = { id: GENERATE_ID(), text: textAfter, collapsed: false, children: [] };
     parentInNewTree.children.splice(index + 1, 0, newNode);
 
     setTree(newTree);
     setFocusId(newNode.id);
-    cursorGoalRef.current = 'start'; // Cursor goes to start of the new split part
+    cursorGoalRef.current = 'start';
     setFocusTrigger(t => t + 1);
   };
 
@@ -803,7 +810,7 @@ export default function App() {
                  cursor: 'move', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', 
                  color: theme.dim, userSelect: 'none', fontSize: '20px', lineHeight: '1'
                }}
-               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
+               onClick={() => { setViewRootId(node.id); setFocusId(node.id); cursorGoalRef.current = null; }}
                draggable onDragStart={(e) => handleDragStart(e, node.id)}
                onDragEnd={handleDragEnd} onDragOver={(e) => e.preventDefault()}
                onDrop={(e) => handleDrop(e, node.id)}
