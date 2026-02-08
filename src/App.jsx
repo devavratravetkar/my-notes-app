@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-3';
+const STORAGE_KEY = 'workflowy-clone-v12-4';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,10 +10,12 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.3 (Visual Stability)', collapsed: false, children: [] },
-      { id: '2', text: 'Try typing a really long sentence in this node to see how it wraps nicely without jittering or switching to a single line scrolling view.', collapsed: false, children: [] },
-      { id: '3', text: 'The bullet point now stays aligned to the top line, even if the text gets very tall.', collapsed: false, children: [
-         { id: '3-1', text: 'Edit me to test the auto-expanding textarea.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.4 (Text Selection Optimized)', collapsed: false, children: [] },
+      { id: '2', text: 'We moved structural shortcuts to Alt to free up Ctrl for text editing.', collapsed: false, children: [] },
+      { id: '3', text: 'New Shortcuts:', collapsed: false, children: [
+         { id: '3-1', text: 'Alt + Up/Down: Collapse/Expand current node.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Alt + Shift + Up/Down: Collapse/Expand ALL.', collapsed: false, children: [] },
+         { id: '3-3', text: 'Ctrl + Shift + Up/Down: Now selects text natively!', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -193,7 +195,6 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           // Textarea cursor positioning logic
            const len = el.value.length; 
            el.setSelectionRange(len, len);
            const rect = el.getBoundingClientRect();
@@ -307,7 +308,6 @@ export default function App() {
     }
   };
 
-  // Auto-resize for textarea
   const adjustHeight = (el) => {
     if (!el) return;
     el.style.height = 'auto';
@@ -606,18 +606,20 @@ export default function App() {
        handleZoomOut();
     }
 
-    if (e.ctrlKey && e.key === 'ArrowDown') {
+    // Expand/Collapse Node (Alt + Arrow) - REPLACES CTRL
+    if (e.altKey && !e.shiftKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
     }
-    if (e.ctrlKey && e.key === 'ArrowUp') {
+    if (e.altKey && !e.shiftKey && e.key === 'ArrowUp') {
        e.preventDefault();
        setCollapseState(node.id, true); 
     }
+
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Standard Arrow Navigation
+    // Standard Arrow Navigation (No modifiers)
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -642,11 +644,13 @@ export default function App() {
          e.preventDefault();
          handleZoomOut();
       }
-      if (e.ctrlKey && e.shiftKey && e.key === 'ArrowDown') {
+      // Expand All (Alt + Shift + Down)
+      if (e.altKey && e.shiftKey && e.key === 'ArrowDown') {
         e.preventDefault();
         handleExpandAll();
       }
-      if (e.ctrlKey && e.shiftKey && e.key === 'ArrowUp') {
+      // Collapse All (Alt + Shift + Up)
+      if (e.altKey && e.shiftKey && e.key === 'ArrowUp') {
         e.preventDefault();
         handleCollapseAll();
       }
@@ -729,7 +733,6 @@ export default function App() {
             background: isSelectedMatch ? theme.activeMatchBg : (isMatch ? theme.matchRowBg : 'transparent'),
             borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
         }}>
-          {/* Controls: Aligned flex-start to stick to top of multi-line nodes */}
           <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px', paddingTop: '4px' }}>
              <span 
                style={{
@@ -884,10 +887,8 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Ctrl + /</span> <span>Focus Search</span></div>
                 <div style={styles.shortcutItem}><span>Alt + /</span> <span>Toggle Help</span></div>
                 <div style={styles.shortcutItem}><span>Alt + Shift + Left/Right</span> <span>Zoom Out / In</span></div>
-                <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
-                <div style={styles.shortcutItem}><span>Ctrl + Shift + Down</span> <span>Expand All</span></div>
-                <div style={styles.shortcutItem}><span>Ctrl + Shift + Up</span> <span>Collapse All</span></div>
-                <div style={styles.shortcutItem}><span>Ctrl + Down / Up</span> <span>Expand / Collapse</span></div>
+                <div style={styles.shortcutItem}><span>Alt + Shift + Up/Down</span> <span>Collapse/Expand All</span></div>
+                <div style={styles.shortcutItem}><span>Alt + Up/Down</span> <span>Collapse/Expand Node</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
                 <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
