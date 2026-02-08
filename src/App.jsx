@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-4';
+const STORAGE_KEY = 'workflowy-clone-v12-5';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.4 (Text Selection Optimized)', collapsed: false, children: [] },
-      { id: '2', text: 'We moved structural shortcuts to Alt to free up Ctrl for text editing.', collapsed: false, children: [] },
-      { id: '3', text: 'New Shortcuts:', collapsed: false, children: [
-         { id: '3-1', text: 'Alt + Up/Down: Collapse/Expand current node.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Alt + Shift + Up/Down: Collapse/Expand ALL.', collapsed: false, children: [] },
-         { id: '3-3', text: 'Ctrl + Shift + Up/Down: Now selects text natively!', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.5 (Smart Truncation)', collapsed: false, children: [] },
+      { id: '2', text: 'Breadcrumbs are now tidy.', collapsed: false, children: [] },
+      { id: '3', text: 'This is a very long node title that serves as an example to demonstrate how the header truncation works when you zoom into it. Click the bullet to zoom in!', collapsed: false, children: [
+         { id: '3-1', text: 'Notice the header above is truncated.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Click the header to reveal the full text for editing.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -28,6 +27,10 @@ const cloneTree = (node) => JSON.parse(JSON.stringify(node));
 
 const escapeRegExp = (string) => {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+const truncate = (str, n) => {
+  return (str && str.length > n) ? str.substr(0, n - 1) + '...' : str;
 };
 
 export default function App() {
@@ -119,6 +122,12 @@ export default function App() {
     return null;
   };
 
+  const adjustHeight = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  };
+
   // --- Search Logic ---
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -195,15 +204,22 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           const len = el.value.length; 
-           el.setSelectionRange(len, len);
+           if (el.tagName === 'TEXTAREA') {
+             const len = el.value.length; 
+             el.setSelectionRange(len, len);
+             adjustHeight(el);
+           }
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
            }
         } else {
+           // If focusing header or fallback
            const headerEl = document.getElementById(`input-${viewRootId}`);
-           if (headerEl) headerEl.focus();
+           if (headerEl) {
+             headerEl.focus();
+             if (headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
+           }
         }
       }, 50);
     }
@@ -276,29 +292,6 @@ export default function App() {
   };
 
   // --- Handlers ---
-  const isDescendant = (tree, sourceId, targetId) => {
-    const sourceResult = findNodeAndParent(tree, sourceId);
-    if (!sourceResult) return false;
-    const { node: sourceNode } = sourceResult;
-    const findInSubtree = (n) => {
-      if (n.id === targetId) return true;
-      return n.children && n.children.some(findInSubtree);
-    };
-    return sourceNode.children && sourceNode.children.some(findInSubtree);
-  };
-
-  const getFlatList = (rootNode) => {
-    const list = [];
-    const traverse = (node) => {
-      if (node.id !== rootNode.id) list.push(node);
-      if (!node.collapsed && node.children) {
-        node.children.forEach(traverse);
-      }
-    };
-    traverse(rootNode);
-    return list;
-  };
-
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -306,12 +299,6 @@ export default function App() {
       result.node.text = newText;
       setTree(newTree);
     }
-  };
-
-  const adjustHeight = (el) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
   };
 
   const handleBlur = (id) => {
@@ -595,7 +582,6 @@ export default function App() {
     if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
 
-    // Zooming (Alt + Shift + Arrow)
     if (e.altKey && e.shiftKey && e.key === 'ArrowRight') {
        e.preventDefault();
        setViewRootId(node.id);
@@ -606,7 +592,6 @@ export default function App() {
        handleZoomOut();
     }
 
-    // Expand/Collapse Node (Alt + Arrow) - REPLACES CTRL
     if (e.altKey && !e.shiftKey && e.key === 'ArrowDown') {
        e.preventDefault();
        setCollapseState(node.id, false); 
@@ -619,7 +604,6 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
-    // Standard Arrow Navigation (No modifiers)
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -639,17 +623,14 @@ export default function App() {
       }
       if (e.key === 'Escape') setShowHelp(false);
       
-      // Zoom Out (Alt + Shift + Left)
       if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
          e.preventDefault();
          handleZoomOut();
       }
-      // Expand All (Alt + Shift + Down)
       if (e.altKey && e.shiftKey && e.key === 'ArrowDown') {
         e.preventDefault();
         handleExpandAll();
       }
-      // Collapse All (Alt + Shift + Up)
       if (e.altKey && e.shiftKey && e.key === 'ArrowUp') {
         e.preventDefault();
         handleCollapseAll();
@@ -790,9 +771,37 @@ export default function App() {
     );
   };
 
+  const renderBreadcrumbs = () => {
+    if (viewRootId === 'root') return null;
+    const path = [];
+    let curr = viewRootId;
+    while(curr) {
+      const res = findNodeAndParent(tree, curr);
+      if(res && res.node) { path.unshift(res.node); curr = res.parent ? res.parent.id : null; }
+      else curr = null;
+    }
+    return (
+      <div style={{ marginBottom: '20px', fontSize: '14px', color: theme.dim }}>
+        {path.map((node, idx) => (
+          <span key={node.id}>
+             {idx > 0 && " > "}
+             <span 
+               style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
+               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
+               title={node.text} // Show full text on hover
+             >
+               {truncate(node.text, 30) || 'Home'}
+             </span>
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   const viewResult = findNodeAndParent(tree, viewRootId);
   if (!viewResult || !viewResult.node) return <div style={{color: theme.fg, padding: '40px'}}>Loading...</div>;
   const currentViewNode = viewResult.node;
+  const isHeaderFocused = focusId === currentViewNode.id;
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -831,40 +840,30 @@ export default function App() {
           </div>
         </div>
         
-        {/* Breadcrumbs */}
-        {viewRootId !== 'root' && (
-          <div style={{ marginBottom: '20px', fontSize: '14px', color: theme.dim }}>
-            {(() => {
-                const path = [];
-                let curr = viewRootId;
-                while(curr) {
-                  const res = findNodeAndParent(tree, curr);
-                  if(res && res.node) { path.unshift(res.node); curr = res.parent ? res.parent.id : null; }
-                  else curr = null;
-                }
-                return path.map((node, idx) => (
-                  <span key={node.id}>
-                     {idx > 0 && " > "}
-                     <span style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
-                       onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}>{node.text || 'Home'}</span>
-                  </span>
-                ));
-            })()}
-          </div>
-        )}
+        {renderBreadcrumbs()}
         
         {/* Editor */}
         <div style={{ background: theme.panel, minHeight: '400px', borderRadius: '8px', padding: '10px' }}>
           {viewRootId !== 'root' && (
             <div style={{ marginBottom: '20px', marginLeft: '30px' }}>
-               <input 
-                 id={`input-${currentViewNode.id}`}
-                 value={currentViewNode.text}
-                 onChange={(e) => handleUpdateText(currentViewNode.id, e.target.value)}
-                 onKeyDown={handleHeaderKeyDown}
-                 style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg }}
-                 autoComplete="off"
-               />
+               {isHeaderFocused ? (
+                 <textarea
+                   id={`input-${currentViewNode.id}`}
+                   value={currentViewNode.text}
+                   onChange={(e) => { handleUpdateText(currentViewNode.id, e.target.value); adjustHeight(e.target); }}
+                   onKeyDown={handleHeaderKeyDown}
+                   ref={el => { if(el) adjustHeight(el); }}
+                   rows={1}
+                   style={{ fontSize: '1.8rem', width: '100%', border: 'none', outline: 'none', fontWeight: 'bold', background: 'transparent', color: theme.fg, resize: 'none', overflow: 'hidden', fontFamily: 'inherit' }}
+                 />
+               ) : (
+                 <div 
+                   onClick={() => { setFocusId(currentViewNode.id); setFocusTrigger(t => t+1); }}
+                   style={{ fontSize: '1.8rem', fontWeight: 'bold', color: theme.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}
+                 >
+                   {currentViewNode.text || 'Untitled'}
+                 </div>
+               )}
             </div>
           )}
           {currentViewNode.children && currentViewNode.children.map(child => renderNode(child))}
@@ -889,6 +888,7 @@ export default function App() {
                 <div style={styles.shortcutItem}><span>Alt + Shift + Left/Right</span> <span>Zoom Out / In</span></div>
                 <div style={styles.shortcutItem}><span>Alt + Shift + Up/Down</span> <span>Collapse/Expand All</span></div>
                 <div style={styles.shortcutItem}><span>Alt + Up/Down</span> <span>Collapse/Expand Node</span></div>
+                <div style={styles.shortcutItem}><span>Ctrl + Left/Right</span> <span>Move by Word</span></div>
                 <div style={styles.shortcutItem}><span>Shift + Up/Down</span> <span>Move Node</span></div>
                 <div style={styles.shortcutItem}><span>Tab / Shift+Tab</span> <span>Indent / Unindent</span></div>
                 <div style={styles.shortcutItem}><span>Enter / Backspace</span> <span>Add / Delete</span></div>
