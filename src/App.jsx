@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-0';
+const STORAGE_KEY = 'workflowy-clone-v13-1';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,12 +10,13 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.0 (Perfect Cursor Positioning)', collapsed: false, children: [] },
-      { id: '2', text: 'Click anywhere in this sentence - the cursor will land exactly where you click.', collapsed: false, children: [] },
-      { id: '3', text: 'Search works perfectly via the "Ghost Overlay" technique:', collapsed: false, children: [
-         { id: '3-1', text: 'Search "Ghost" to see the highlight appear BEHIND the text.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Editing remains silky smooth.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.1 (Fixed Visibility)', collapsed: false, children: [] },
+      { id: '2', text: 'Search for "Visual" to see the fix.', collapsed: false, children: [] },
+      { id: '3', text: 'The text is now fully visible during search.', collapsed: false, children: [
+         { id: '3-1', text: 'Visual: Highlights are behind the text.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Normal text is visible too.', collapsed: false, children: [] }
       ]},
+      { id: '4', text: 'Navigation (Up/Down) works perfectly again.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -124,7 +125,7 @@ export default function App() {
 
   const adjustHeight = (el) => {
     if (!el) return;
-    el.style.height = 'auto';
+    el.style.height = 'auto'; // Reset to calculate new height
     el.style.height = el.scrollHeight + 'px';
   };
 
@@ -205,10 +206,7 @@ export default function App() {
         if (el) {
            el.focus();
            if (el.tagName === 'TEXTAREA') adjustHeight(el);
-           // NOTE: We intentionally REMOVED the setSelectionRange logic here for existing nodes
-           // This allows the browser's native click placement to work for mouse users.
-           // For keyboard navigation, we handle cursor logic in the handlers or it defaults to end.
-           
+           // We do NOT set selectionRange here to allow native click placement
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -220,7 +218,7 @@ export default function App() {
              if (headerEl.tagName === 'TEXTAREA') adjustHeight(headerEl);
            }
         }
-      }, 0); // Fast timeout for responsiveness
+      }, 0);
     }
   }, [focusId, viewRootId, focusTrigger]); 
 
@@ -283,7 +281,7 @@ export default function App() {
           part.toLowerCase() === query.toLowerCase() ? (
             <span key={i} style={{ backgroundColor: theme.textHighlightBg, color: theme.textHighlightFg, fontWeight: 'bold' }}>{part}</span>
           ) : (
-            part
+            part // This was correctly rendering, but the container was transparent
           )
         )}
       </span>
@@ -291,6 +289,29 @@ export default function App() {
   };
 
   // --- Handlers ---
+  const isDescendant = (tree, sourceId, targetId) => {
+    const sourceResult = findNodeAndParent(tree, sourceId);
+    if (!sourceResult) return false;
+    const { node: sourceNode } = sourceResult;
+    const findInSubtree = (n) => {
+      if (n.id === targetId) return true;
+      return n.children && n.children.some(findInSubtree);
+    };
+    return sourceNode.children && sourceNode.children.some(findInSubtree);
+  };
+
+  const getFlatList = (rootNode) => {
+    const list = [];
+    const traverse = (node) => {
+      if (node.id !== rootNode.id) list.push(node);
+      if (!node.collapsed && node.children) {
+        node.children.forEach(traverse);
+      }
+    };
+    traverse(rootNode);
+    return list;
+  };
+
   const handleUpdateText = (id, newText) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -300,10 +321,14 @@ export default function App() {
     }
   };
 
-  const handleFocus = (id) => {
-    if (focusId !== id) {
-      setFocusId(id);
-      // We do NOT increment focusTrigger here to avoid fighting the browser's native cursor placement
+  const handleBlur = (id) => {
+    const newTree = cloneTree(tree);
+    const result = findNodeAndParent(newTree, id);
+    if (result && result.node) {
+      if (result.node.text.trim() === '' && result.node.children && result.node.children.length > 0) {
+        result.node.text = "...";
+        setTree(newTree);
+      }
     }
   };
 
@@ -392,7 +417,7 @@ export default function App() {
     result.node.children.unshift(newNode);
     setTree(newTree);
     setFocusId(newNode.id);
-    setFocusTrigger(t => t + 1); // Force cursor to new node
+    setFocusTrigger(t => t + 1);
   };
 
   const handleHeaderKeyDown = (e) => {
@@ -557,9 +582,11 @@ export default function App() {
   };
 
   const handleArrow = (e, id, direction) => {
+    // SMART NAVIGATION: Only navigate if at text boundary
     const el = e.target;
     if (el) {
       const { selectionStart, value } = el;
+      // Allow native movement inside text
       if (direction === 'up' && selectionStart > 0) return; 
       if (direction === 'down' && selectionStart < value.length) return; 
     }
@@ -612,6 +639,7 @@ export default function App() {
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowUp') handleMoveNode(e, node.id, 'up');
     if (e.shiftKey && !e.ctrlKey && !e.altKey && e.key === 'ArrowDown') handleMoveNode(e, node.id, 'down');
 
+    // Standard Arrow Navigation
     if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
        if (e.key === 'ArrowUp') handleArrow(e, node.id, 'up');
        if (e.key === 'ArrowDown') handleArrow(e, node.id, 'down');
@@ -708,7 +736,6 @@ export default function App() {
     const isDimmed = searchQuery && !isMatch; 
     const isSelectedMatch = isMatch && matchIds[currentMatchIndex] === node.id;
 
-    // Common text styles for perfect alignment
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
       boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
@@ -746,13 +773,13 @@ export default function App() {
           </div>
           
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
-            {/* Layer 1: Highlight Overlay (Behind) */}
+            {/* Layer 1: Highlight Overlay (Behind) - FIXED: Color is now visible */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
                visibility: searchQuery ? 'visible' : 'hidden',
-               pointerEvents: 'none', // Allow clicks to pass through to textarea
-               color: 'transparent' // Hide the main text, show only background colors
+               pointerEvents: 'none', 
+               color: theme.fg // FIXED: Non-matching text is now visible
             }}>
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
@@ -764,7 +791,7 @@ export default function App() {
               value={node.text}
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
-              onFocus={() => handleFocus(node.id)} 
+              onFocus={() => { setFocusId(node.id); }}
               rows={1}
               style={{
                 ...commonTextStyle,
@@ -772,7 +799,8 @@ export default function App() {
                 border: 'none', outline: 'none', background: 'transparent', 
                 resize: 'none', overflow: 'hidden',
                 color: searchQuery ? 'transparent' : theme.fg, // Transparent text if searching
-                caretColor: theme.fg // Cursor always visible
+                caretColor: theme.fg, // Cursor always visible
+                zIndex: 1 // Ensure clicks hit this layer
               }} 
             />
           </div>
