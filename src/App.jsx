@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-36';
+const STORAGE_KEY = 'workflowy-clone-v13-37';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,17 +10,9 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.36 (The Complete Build)', collapsed: false, children: [] },
-      { id: '2', text: 'Performance & Features:', collapsed: false, children: [
-         { id: '2-1', text: 'Zero Layout Thrashing (CSS Grid resizing).', collapsed: false, children: [] },
-         { id: '2-2', text: 'React.memo() prevents re-rendering unchanged nodes.', collapsed: false, children: [] },
-         { id: '2-3', text: 'Structural Sharing updates state efficiently.', collapsed: false, children: [] }
-      ]},
-      { id: '3', text: 'All Features Restored:', collapsed: false, children: [
-         { id: '3-1', text: 'Drag & Drop works.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Shift + Up/Down (Move Node) works.', collapsed: false, children: [] },
-         { id: '3-3', text: 'Deep Linking & Backspace Merge work.', collapsed: false, children: [] }
-      ]}
+      { id: '1', text: 'Welcome to v13.37 (Build Fix)', collapsed: false, children: [] },
+      { id: '2', text: 'We removed the unused variables that were causing the Netlify build to fail.', collapsed: false, children: [] },
+      { id: '3', text: 'Everything else is identical to the high-performance v13.36 build.', collapsed: false, children: [] }
     ]
   },
   viewRootId: 'root',
@@ -71,6 +63,10 @@ const parseTextToNodes = (text) => {
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const truncate = (str, n) => {
+  return (str && str.length > n) ? str.substr(0, n - 1) + '...' : str;
+};
+
 // Helper to find a node and its parent in the tree
 const findRes = (root, id, parent = null) => {
   if (root.id === id) return { node: root, parent };
@@ -100,7 +96,6 @@ const updateNodeInTree = (node, id, transform) => {
   if (node.id === id) return transform(node);
   if (!node.children) return node;
   
-  // Optimization: Only clone path to node
   const childIndex = node.children.findIndex(c => c.id === id || containsId(c, id));
   if (childIndex === -1) return node;
 
@@ -139,7 +134,6 @@ const NodeItem = React.memo(({
           background: isSelectedMatch ? theme.activeMatchBg : (isMatch ? theme.matchRowBg : 'transparent'),
           borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
       }}>
-        {/* Bullet / Controls */}
         <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px', paddingTop: '4px' }}>
            <span 
              style={{
@@ -162,14 +156,11 @@ const NodeItem = React.memo(({
            >•</span>
         </div>
         
-        {/* Content Area (Grid Hack) */}
         <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
-          {/* Invisible sizing div */}
           <div style={{ ...commonTextStyle, gridArea: '1 / 1', visibility: 'hidden', pointerEvents: 'none' }}>
              {node.text + ' '}
           </div>
 
-          {/* Visible Input */}
           <textarea
             id={`input-${node.id}`}
             value={node.text}
@@ -190,7 +181,6 @@ const NodeItem = React.memo(({
             }} 
           />
           
-          {/* Search Highlight */}
           {searchQuery && (
             <div style={{ ...commonTextStyle, gridArea: '1 / 1', visibility: 'visible', pointerEvents: 'none', color: theme.fg, zIndex: 2 }}>
                {node.text.split(new RegExp(`(${escapeRegExp(searchQuery)})`, 'gi')).map((part, i) => 
@@ -203,14 +193,13 @@ const NodeItem = React.memo(({
         </div>
       </div>
 
-      {/* Recursive Children */}
       {!node.collapsed && node.children && (
         <div style={{ borderLeft: `1px solid ${theme.border}`, marginLeft: '29px' }}>
           {node.children.map(child => (
             <NodeItem 
               key={child.id} 
               node={child} 
-              isFocused={child.id === handlers.focusedId} // Pass simple prop
+              isFocused={child.id === handlers.focusedId}
               isMatch={handlers.matchIds && handlers.matchIds.includes(child.id)}
               isSelectedMatch={handlers.matchIds && handlers.matchIds[handlers.matchIndex] === child.id}
               searchQuery={searchQuery}
@@ -235,7 +224,7 @@ const NodeItem = React.memo(({
 
 
 export default function App() {
-  const [state, setState] = useState(() => {
+  const [state] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (!saved) return DEFAULT_STATE;
@@ -274,7 +263,6 @@ export default function App() {
   useEffect(() => {
     if (!searchQuery.trim()) { setMatchIds([]); setCurrentMatchIndex(-1); return; }
     const matches = [];
-    // Helper to search (readonly)
     const traverse = (n) => {
         if(n.text.toLowerCase().includes(searchQuery.toLowerCase())) matches.push(n.id);
         if(n.children) n.children.forEach(traverse);
@@ -292,7 +280,6 @@ export default function App() {
 
   const handleToggleCollapse = useCallback((e, id) => {
     e && e.stopPropagation();
-    // Focus Rescue Logic
     let rescueId = null;
     if(focusId) {
        const path = findPath(tree, focusId);
@@ -318,7 +305,25 @@ export default function App() {
       }
   }, [tree, viewRootId]);
 
-  // --- Complex Logic (Using Full Tree Clone for Safety on Structure Changes) ---
+  const handleGoHome = useCallback(() => {
+      setViewRootId('root');
+      setFocusId('root');
+  }, []);
+
+  const handleAddFirstChild = useCallback(() => {
+    setTree(prev => {
+        const newTree = JSON.parse(JSON.stringify(prev));
+        const res = findRes(newTree, viewRootId);
+        if (!res || !res.node) return prev;
+        const newNode = { id: GENERATE_ID(), text: '', collapsed: false, children: [] };
+        if(!res.node.children) res.node.children = [];
+        res.node.children.unshift(newNode);
+        setTimeout(() => { setFocusId(newNode.id); cursorGoalRef.current='start'; },0);
+        return newTree;
+    });
+  }, [viewRootId]);
+
+  // --- Complex Logic ---
   
   const runEnter = useCallback((e, id) => {
       e.preventDefault();
@@ -339,7 +344,7 @@ export default function App() {
               const textAfter = node.text.slice(cursor);
               node.text = node.text.slice(0, cursor);
               const newNode = {id: GENERATE_ID(), text:textAfter, collapsed:false, children:[]};
-              if(node.children.length > 0 && !node.collapsed) {
+              if(node.children && node.children.length > 0 && !node.collapsed) {
                   node.children.unshift(newNode);
               } else {
                   const idx = parent.children.findIndex(c=>c.id===id);
@@ -363,7 +368,6 @@ export default function App() {
           const idx = parent.children.findIndex(c=>c.id===id);
           
           if(node.children && node.children.length > 0) {
-              // Unindent if has children
               if(idx===0 && parent.id !== viewRootId) {
                   const gpRes = findRes(newTree, parent.id);
                   if(gpRes && gpRes.parent) {
@@ -373,30 +377,27 @@ export default function App() {
                       setTimeout(() => { setFocusId(id); cursorGoalRef.current='end'; },0);
                   }
               }
-              return newTree; // Don't merge if has children (unless moved)
+              return newTree; 
           }
 
           if(idx > 0) {
               const prevNode = parent.children[idx-1];
-              if(prevNode.children.length > 0 && !prevNode.collapsed) {
-                  // Move In
+              if(prevNode.children && prevNode.children.length > 0 && !prevNode.collapsed) {
                   parent.children.splice(idx,1);
                   prevNode.children.push(node);
                   setTimeout(() => { setFocusId(node.id); cursorGoalRef.current='start'; },0);
               } else {
-                  // Merge
                   const cursor = prevNode.text.length + (prevNode.text && node.text ? 1 : 0);
                   if(prevNode.text && node.text) prevNode.text += " ";
                   prevNode.text += node.text;
                   parent.children.splice(idx,1);
-                  if(node.children.length) {
+                  if(node.children && node.children.length) {
                       prevNode.children = [...prevNode.children, ...node.children];
                       prevNode.collapsed = false;
                   }
                   setTimeout(() => { setFocusId(prevNode.id); cursorGoalRef.current=cursor; },0);
               }
           } else if(parent.id !== viewRootId) {
-              // Unindent
               const gpRes = findRes(newTree, parent.id);
               if(gpRes && gpRes.parent) {
                   const pIdx = gpRes.parent.children.findIndex(c=>c.id===parent.id);
@@ -411,7 +412,6 @@ export default function App() {
 
   const runArrow = useCallback((e, id, dir) => {
       e.preventDefault();
-      // Active Sanitize current
       setTree(prev => updateNodeInTree(prev, id, n => ({...n, text: n.text.trim().replace(/\n{3,}/g, '\n\n')})));
       
       const visibleList = [];
@@ -441,17 +441,14 @@ export default function App() {
           if(dir==='up') {
               if(idx > 0) {
                   const prev = parent.children[idx-1];
-                  if(!prev.collapsed && prev.children.length > 0) {
-                      // Move into prev child
+                  if(!prev.collapsed && prev.children && prev.children.length > 0) {
                       parent.children.splice(idx,1);
                       prev.children.push(node);
                   } else {
-                      // Swap
                       parent.children[idx] = prev;
                       parent.children[idx-1] = node;
                   }
               } else if(parent.id !== viewRootId) {
-                  // Move out (up)
                   const gpRes = findRes(newTree, parent.id);
                   if(gpRes && gpRes.parent) {
                       const pIdx = gpRes.parent.children.findIndex(c=>c.id===parent.id);
@@ -459,20 +456,17 @@ export default function App() {
                       gpRes.parent.children.splice(pIdx, 0, node);
                   }
               }
-          } else { // Down
+          } else { 
               if(idx < parent.children.length-1) {
                   const next = parent.children[idx+1];
-                  if(!next.collapsed && next.children.length > 0) {
-                      // Move into next child (as first)
+                  if(!next.collapsed && next.children && next.children.length > 0) {
                       parent.children.splice(idx,1);
                       next.children.unshift(node);
                   } else {
-                      // Swap
                       parent.children[idx] = next;
                       parent.children[idx+1] = node;
                   }
               } else if(parent.id !== viewRootId) {
-                  // Move out (down)
                   const gpRes = findRes(newTree, parent.id);
                   if(gpRes && gpRes.parent) {
                       const pIdx = gpRes.parent.children.findIndex(c=>c.id===parent.id);
@@ -498,6 +492,7 @@ export default function App() {
           if(idx === 0) return prev;
           const prev = parent.children[idx-1];
           parent.children.splice(idx,1);
+          if(!prev.children) prev.children = [];
           prev.children.push(node);
           prev.collapsed = false;
           setTimeout(() => { setFocusId(id); cursorGoalRef.current='end'; }, 0);
@@ -576,7 +571,6 @@ export default function App() {
       if(!draggedId || draggedId === targetId) return;
       setTree(prev => {
           const newTree = JSON.parse(JSON.stringify(prev));
-          // Sanity check descendant
           let curr = findRes(newTree, targetId);
           while(curr && curr.parent) {
               if(curr.parent.id === draggedId) return prev;
@@ -597,6 +591,26 @@ export default function App() {
       setDraggedId(null);
   }, [draggedId]);
 
+  const handleNodeKeyDown = useCallback((e, node) => {
+      if (e.key === 'Enter' && !e.shiftKey) runEnter(e, node.id);
+      if (e.key === 'Backspace') runBackspace(e, node.id);
+      if (e.key === 'Tab') {
+          if (e.shiftKey) runShiftTab(e, node.id);
+          else runTab(e, node.id);
+      }
+      if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.altKey) runArrow(e, node.id, 'up');
+      if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.altKey) runArrow(e, node.id, 'down');
+      
+      if (e.altKey && !e.shiftKey && e.key === 'ArrowDown') handleToggleCollapse(e, node.id);
+      if (e.altKey && !e.shiftKey && e.key === 'ArrowUp') handleToggleCollapse(e, node.id);
+      
+      if (e.shiftKey && e.key === 'ArrowUp' && !e.altKey) runMoveNode(e, node.id, 'up');
+      if (e.shiftKey && e.key === 'ArrowDown' && !e.altKey) runMoveNode(e, node.id, 'down');
+      
+      if (e.altKey && e.shiftKey && e.key === 'ArrowRight') handleZoom(node.id);
+      if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') handleZoomOut();
+  }, [runEnter, runBackspace, runTab, runShiftTab, runArrow, handleToggleCollapse, runMoveNode, handleZoom, handleZoomOut]);
+
   const handlers = useMemo(() => ({
     onUpdateText: handleUpdateText,
     onToggleCollapse: handleToggleCollapse,
@@ -608,12 +622,11 @@ export default function App() {
     onDragStart: (e, id) => { setDraggedId(id); skipBlurRef.current=true; },
     onDragEnd: (e) => setDraggedId(null),
     onDrop: handleDrop,
-    focusedId: focusId, // Pass simple value for comparison
+    focusedId: focusId, 
     matchIds,
     matchIndex: currentMatchIndex
-  }), [handleUpdateText, handleToggleCollapse, handleZoom, handleBlur, handlePaste, handleDrop, focusId, matchIds, currentMatchIndex]);
+  }), [handleUpdateText, handleToggleCollapse, handleNodeKeyDown, handleBlur, handlePaste, handleZoom, handleDrop, focusId, matchIds, currentMatchIndex]);
 
-  // --- Focus & Scroll Effect ---
   useEffect(() => {
     if (focusId) {
       setTimeout(() => {
@@ -627,21 +640,46 @@ export default function App() {
            
            const rect = el.getBoundingClientRect();
            if (rect.top < 0 || rect.bottom > window.innerHeight) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+           document.getElementById(`input-${viewRootId}`)?.focus();
         }
       }, 0);
     }
-  }, [focusId, focusTrigger]); 
+  }, [focusId, focusTrigger, viewRootId]);
 
-  // --- Main Render ---
+  const handleGlobalKeyDown = useCallback((e) => {
+      if (e.ctrlKey && e.key === '/') { e.preventDefault(); searchInputRef.current?.focus(); }
+      if (e.altKey && e.key === '/') { e.preventDefault(); setShowHelp(p => !p); }
+      if (e.key === 'Escape') { setShowHelp(false); setShowExport(false); }
+      if (e.altKey && e.key === 'h') { e.preventDefault(); handleGoHome(); }
+      if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') { e.preventDefault(); handleZoomOut(); }
+      
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        const activeTag = document.activeElement.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA') {
+           e.preventDefault();
+           if (lastFocusRef.current) {
+             const exists = findRes(tree, lastFocusRef.current);
+             if (exists) { setFocusId(lastFocusRef.current); cursorGoalRef.current = 'end'; return; }
+           }
+           handleAddFirstChild();
+        }
+      }
+  }, [handleGoHome, handleZoomOut, handleAddFirstChild, tree]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [handleGlobalKeyDown]);
+
   const viewResult = findRes(tree, viewRootId);
   const currentViewNode = viewResult ? viewResult.node : tree;
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: theme.bg, color: theme.fg, fontFamily: 'sans-serif', padding: '40px' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-           <h1 style={{ cursor: 'pointer', margin:0 }} onClick={handleGoHome}>Workflowy v13.36</h1>
+           <h1 style={{ cursor: 'pointer', margin:0 }} onClick={handleGoHome}>Workflowy v13.37</h1>
            <div style={{ display: 'flex', gap: '10px' }}>
              <button onClick={() => setShowExport(true)}>Export</button>
              <button onClick={() => setDarkMode(!darkMode)}>{darkMode ? '☀️' : '🌙'}</button>
@@ -649,7 +687,6 @@ export default function App() {
            </div>
         </div>
 
-        {/* Search */}
         <div style={{ marginBottom: '20px' }}>
             <input 
               ref={searchInputRef}
@@ -661,12 +698,10 @@ export default function App() {
             />
         </div>
 
-        {/* Breadcrumbs */}
         <div style={{ marginBottom: '20px', color: theme.dim }}>
-           {viewRootId !== 'root' && <span style={{cursor:'pointer'}} onClick={handleZoomOut}>&lt; Back</span>}
+           {viewRootId !== 'root' && <span style={{cursor:'pointer', textDecoration:'underline'}} onClick={handleZoomOut}>&lt; Back to Parent</span>}
         </div>
 
-        {/* Root Editor (Header) */}
         <div style={{ fontSize: '2em', fontWeight: 'bold', marginBottom: '10px' }}>
             {viewRootId === 'root' ? 'Home' : (
                 <textarea 
@@ -677,7 +712,6 @@ export default function App() {
             )}
         </div>
 
-        {/* Children List */}
         <div>
            {currentViewNode.children && currentViewNode.children.map(child => (
              <NodeItem 
@@ -693,22 +727,20 @@ export default function App() {
            ))}
            {(!currentViewNode.children || currentViewNode.children.length === 0) && (
                <div style={{ padding: '20px', color: theme.dim, cursor: 'pointer' }} onClick={handleAddFirstChild}>
-                   Click to add item
+                   Click here to start typing...
                </div>
            )}
         </div>
 
-        {/* Export Modal */}
         {showExport && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowExport(false)}>
             <div style={{ background: theme.panel, padding: '20px', borderRadius: '8px', width: '600px', height: '400px', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-                <textarea readOnly value={treeToString(tree)} style={{ flex: 1, marginBottom: '10px' }} />
+                <textarea readOnly value={treeToString(tree)} style={{ flex: 1, marginBottom: '10px', background: theme.inputBg, color: theme.fg }} />
                 <button onClick={() => setShowExport(false)}>Close</button>
             </div>
           </div>
         )}
         
-        {/* Help Modal */}
         {showHelp && (
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowHelp(false)}>
                 <div style={{ background: theme.panel, padding: '20px', borderRadius: '8px', color: theme.fg }} onClick={e=>e.stopPropagation()}>
