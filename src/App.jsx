@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v12-2';
+const STORAGE_KEY = 'workflowy-clone-v12-3';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,14 +10,10 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v12.2 (Conflict-Free Shortcuts)', collapsed: false, children: [] },
-      { id: '2', text: 'Text Selection is restored:', collapsed: false, children: [
-         { id: '2-1', text: 'Ctrl + Shift + Arrows selects words.', collapsed: false, children: [] },
-         { id: '2-2', text: 'Ctrl + Arrows jumps words.', collapsed: false, children: [] }
-      ]},
-      { id: '3', text: 'Zooming is now safe (No browser back button conflict):', collapsed: false, children: [
-         { id: '3-1', text: 'Alt + Shift + Right to Zoom In.', collapsed: false, children: [] },
-         { id: '3-2', text: 'Alt + Shift + Left to Zoom Out.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v12.3 (Visual Stability)', collapsed: false, children: [] },
+      { id: '2', text: 'Try typing a really long sentence in this node to see how it wraps nicely without jittering or switching to a single line scrolling view.', collapsed: false, children: [] },
+      { id: '3', text: 'The bullet point now stays aligned to the top line, even if the text gets very tall.', collapsed: false, children: [
+         { id: '3-1', text: 'Edit me to test the auto-expanding textarea.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -197,6 +193,7 @@ export default function App() {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
+           // Textarea cursor positioning logic
            const len = el.value.length; 
            el.setSelectionRange(len, len);
            const rect = el.getBoundingClientRect();
@@ -308,6 +305,13 @@ export default function App() {
       result.node.text = newText;
       setTree(newTree);
     }
+  };
+
+  // Auto-resize for textarea
+  const adjustHeight = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
   };
 
   const handleBlur = (id) => {
@@ -586,7 +590,7 @@ export default function App() {
   };
 
   const handleItemKeyDown = (e, node) => {
-    if (e.key === 'Enter') handleEnter(e, node.id);
+    if (e.key === 'Enter' && !e.shiftKey) handleEnter(e, node.id);
     if (e.key === 'Backspace') handleBackspace(e, node.id, node.text);
     if (e.key === 'Tab' && !e.shiftKey) handleTab(e, node.id);
     if (e.key === 'Tab' && e.shiftKey) handleShiftTab(e, node.id);
@@ -713,18 +717,20 @@ export default function App() {
 
     const commonTextStyle = {
       fontSize: '16px', lineHeight: '24px', padding: '4px', fontFamily: 'inherit',
-      boxSizing: 'border-box', height: '32px', display: 'block', width: '100%', margin: 0
+      boxSizing: 'border-box', minHeight: '32px', display: 'block', width: '100%', margin: 0,
+      whiteSpace: 'pre-wrap', overflowWrap: 'break-word'
     };
 
     return (
       <div key={node.id} style={{ marginLeft: '20px', position: 'relative', color: theme.fg }}>
         <div style={{ 
-            display: 'flex', alignItems: 'center', padding: '2px 0', borderRadius: '4px',
+            display: 'flex', alignItems: 'flex-start', padding: '2px 0', borderRadius: '4px',
             opacity: isDimmed ? 0.4 : 1,
             background: isSelectedMatch ? theme.activeMatchBg : (isMatch ? theme.matchRowBg : 'transparent'),
             borderLeft: isSelectedMatch ? `3px solid ${theme.activeMatchBorder}` : '3px solid transparent'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px' }}>
+          {/* Controls: Aligned flex-start to stick to top of multi-line nodes */}
+          <div style={{ display: 'flex', alignItems: 'center', width: '30px', justifyContent: 'flex-end', marginRight: '5px', paddingTop: '4px' }}>
              <span 
                style={{
                  cursor: 'pointer', fontSize: '10px', color: theme.dim, marginRight: '4px', 
@@ -748,14 +754,19 @@ export default function App() {
           
           <div style={{ flex: 1, position: 'relative' }}>
             {isEditing ? (
-              <input
+              <textarea
+                ref={el => { if(el && isEditing) adjustHeight(el); }}
                 id={`input-${node.id}`}
                 value={node.text}
-                onChange={(e) => handleUpdateText(node.id, e.target.value)}
+                onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
                 onKeyDown={(e) => handleItemKeyDown(e, node)}
                 onBlur={() => handleBlur(node.id)}
-                style={{ ...commonTextStyle, border: 'none', outline: 'none', background: 'transparent', color: theme.fg }} 
-                autoComplete="off"
+                rows={1}
+                style={{
+                  ...commonTextStyle,
+                  border: 'none', outline: 'none', background: 'transparent', color: theme.fg,
+                  resize: 'none', overflow: 'hidden'
+                }} 
               />
             ) : (
               <div 
