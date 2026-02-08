@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // --- Utils & Constants ---
 const GENERATE_ID = () => Math.random().toString(36).substr(2, 9);
-const STORAGE_KEY = 'workflowy-clone-v13-2';
+const STORAGE_KEY = 'workflowy-clone-v13-3';
 
 const DEFAULT_STATE = {
   tree: {
@@ -10,11 +10,11 @@ const DEFAULT_STATE = {
     text: 'Home',
     collapsed: false,
     children: [
-      { id: '1', text: 'Welcome to v13.2 (Safety Lock Restored)', collapsed: false, children: [] },
-      { id: '2', text: 'Try emptying the parent node below (delete "Parent"), then click away.', collapsed: false, children: [] },
-      { id: '3', text: 'Parent', collapsed: false, children: [
-         { id: '3-1', text: 'I am a child node.', collapsed: false, children: [] },
-         { id: '3-2', text: 'If you empty my parent, it becomes "..." to save me.', collapsed: false, children: [] }
+      { id: '1', text: 'Welcome to v13.3 (Navigation Fixed)', collapsed: false, children: [] },
+      { id: '2', text: 'Mouse clicks work perfectly (cursor lands where you click).', collapsed: false, children: [] },
+      { id: '3', text: 'Keyboard Navigation works perfectly (Up goes to end of previous line, Down goes to start of next).', collapsed: false, children: [
+         { id: '3-1', text: 'Try navigating up and down this list.', collapsed: false, children: [] },
+         { id: '3-2', text: 'Try deleting this text to see the "..." safety lock.', collapsed: false, children: [] }
       ]},
     ]
   },
@@ -65,6 +65,10 @@ export default function App() {
 
   const searchInputRef = useRef(null);
   const lastFocusRef = useRef(null);
+  
+  // NEW: Tracks where the cursor should land after a focus switch. 
+  // Values: 'start', 'end', or null (for mouse clicks)
+  const cursorGoalRef = useRef(null);
 
   // --- Persistence ---
   useEffect(() => {
@@ -169,6 +173,7 @@ export default function App() {
     if (searchInputRef.current) searchInputRef.current.blur();
     
     const dest = targetId || lastFocusRef.current || viewRootId;
+    cursorGoalRef.current = 'end'; // Default to end of line when jumping back
     setFocusId(dest);
     setFocusTrigger(t => t + 1);
   };
@@ -197,14 +202,27 @@ export default function App() {
     }
   };
 
-  // --- Focus Management ---
+  // --- Focus Management (The Core Fix) ---
   useEffect(() => {
     if (focusId && document.activeElement !== searchInputRef.current) {
       setTimeout(() => {
         const el = document.getElementById(`input-${focusId}`);
         if (el) {
            el.focus();
-           if (el.tagName === 'TEXTAREA') adjustHeight(el);
+           if (el.tagName === 'TEXTAREA') {
+             adjustHeight(el);
+             // CRITICAL FIX: Only force cursor position if a goal was set by keyboard.
+             // Otherwise (mouse click), leave it alone.
+             if (cursorGoalRef.current === 'start') {
+               el.setSelectionRange(0, 0);
+             } else if (cursorGoalRef.current === 'end') {
+               const len = el.value.length;
+               el.setSelectionRange(len, len);
+             }
+             // Reset goal
+             cursorGoalRef.current = null;
+           }
+           
            const rect = el.getBoundingClientRect();
            if (rect.bottom > window.innerHeight || rect.top < 0) {
              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -223,16 +241,13 @@ export default function App() {
   // --- Initialization & Safety ---
   useEffect(() => {
     const cleanTree = cloneTree(tree);
-    
-    // SAFETY FIX 1: Do not prune nodes that have children, even if text is empty
     const pruneEmpty = (node) => {
       if (!node.children) return;
       node.children = node.children.filter(child => {
         const hasText = child.text && child.text.trim() !== '';
         const isFocused = child.id === focusId;
-        const hasChildren = child.children && child.children.length > 0; // CRITICAL: Keep parents!
+        const hasChildren = child.children && child.children.length > 0;
         const keep = hasText || isFocused || hasChildren;
-        
         if (keep) pruneEmpty(child);
         return keep;
       });
@@ -302,7 +317,6 @@ export default function App() {
     }
   };
 
-  // SAFETY FIX 2: On Blur, if node is empty but has children, set text to "..."
   const handleBlur = (id) => {
     const newTree = cloneTree(tree);
     const result = findNodeAndParent(newTree, id);
@@ -375,7 +389,6 @@ export default function App() {
         const focusResult = findNodeAndParent(newTree, focusId);
         if (focusResult && focusResult.node && focusResult.parent) {
            const { node, parent } = focusResult;
-           // Only delete if NO children
            if (node.text.trim() === '' && (!node.children || node.children.length === 0)) {
                const index = parent.children.findIndex(c => c.id === focusId);
                if (index !== -1) {
@@ -389,6 +402,7 @@ export default function App() {
      if (result && result.parent) {
        setViewRootId(result.parent.id);
        setFocusId(viewRootId);
+       cursorGoalRef.current = 'start';
        if (dirty) setTree(newTree);
      }
   };
@@ -401,6 +415,7 @@ export default function App() {
     result.node.children.unshift(newNode);
     setTree(newTree);
     setFocusId(newNode.id);
+    cursorGoalRef.current = 'start';
     setFocusTrigger(t => t + 1);
   };
 
@@ -414,6 +429,7 @@ export default function App() {
       const result = findNodeAndParent(tree, viewRootId);
       if (result && result.node && result.node.children.length > 0) {
         setFocusId(result.node.children[0].id);
+        cursorGoalRef.current = 'start';
         setFocusTrigger(t => t + 1);
       }
     }
@@ -435,6 +451,7 @@ export default function App() {
     grandParent.children.splice(parentIndex + 1, 0, node);
     setTree(newTree);
     setFocusId(id);
+    cursorGoalRef.current = 'end';
     setFocusTrigger(t => t + 1);
   };
 
@@ -454,6 +471,7 @@ export default function App() {
     parent.children.splice(index + 1, 0, newNode);
     setTree(newTree);
     setFocusId(newNode.id);
+    cursorGoalRef.current = 'start';
     setFocusTrigger(t => t + 1);
   };
 
@@ -464,7 +482,6 @@ export default function App() {
     const result = findNodeAndParent(newTree, id);
     if (!result || !result.parent) return;
     
-    // SAFETY FIX 3: Check for children before deleting on backspace
     if (result.node.children && result.node.children.length > 0) {
       result.node.text = "..."; 
       setTree(newTree);
@@ -491,6 +508,7 @@ export default function App() {
     setTree(newTree);
     if (nextFocusId) {
         setFocusId(nextFocusId);
+        cursorGoalRef.current = 'end';
         setFocusTrigger(t => t + 1);
     }
   };
@@ -511,6 +529,7 @@ export default function App() {
     prevSibling.collapsed = false; 
     setTree(newTree);
     setFocusId(id);
+    cursorGoalRef.current = 'end';
     setFocusTrigger(t => t + 1);
   };
 
@@ -565,6 +584,7 @@ export default function App() {
     }
     setTree(newTree);
     setFocusId(id);
+    // Move node keeps cursor same place, no need to force start/end
     setFocusTrigger(t => t + 1);
   };
 
@@ -585,12 +605,15 @@ export default function App() {
     if (direction === 'up') {
       if (currentIndex > 0) {
         setFocusId(flatList[currentIndex - 1].id);
+        cursorGoalRef.current = 'end'; // Up -> End of previous
       } else if (viewRootId !== 'root') {
         setFocusId(viewRootId);
+        cursorGoalRef.current = 'end';
       }
     } else if (direction === 'down') {
       if (currentIndex < flatList.length - 1) {
         setFocusId(flatList[currentIndex + 1].id);
+        cursorGoalRef.current = 'start'; // Down -> Start of next
       }
     }
     setFocusTrigger(t => t + 1);
@@ -606,6 +629,7 @@ export default function App() {
        e.preventDefault();
        setViewRootId(node.id);
        setFocusId(node.id);
+       cursorGoalRef.current = 'start';
     }
     if (e.altKey && e.shiftKey && e.key === 'ArrowLeft') {
        e.preventDefault();
@@ -663,6 +687,7 @@ export default function App() {
              const exists = findNodeAndParent(tree, lastFocusRef.current);
              if (exists && exists.node) {
                setFocusId(lastFocusRef.current);
+               cursorGoalRef.current = 'end';
                setFocusTrigger(t => t + 1);
                return;
              }
@@ -672,6 +697,7 @@ export default function App() {
                handleAddFirstChild();
            } else if (result && result.node && result.node.children.length > 0) {
                setFocusId(result.node.children[0].id);
+               cursorGoalRef.current = 'start';
                setFocusTrigger(t => t+1);
            }
         }
@@ -749,7 +775,7 @@ export default function App() {
                  cursor: 'move', width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', 
                  color: theme.dim, userSelect: 'none', fontSize: '20px', lineHeight: '1'
                }}
-               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
+               onClick={() => { setViewRootId(node.id); setFocusId(node.id); cursorGoalRef.current = null; }}
                draggable onDragStart={(e) => handleDragStart(e, node.id)}
                onDragEnd={handleDragEnd} onDragOver={(e) => e.preventDefault()}
                onDrop={(e) => handleDrop(e, node.id)}
@@ -757,7 +783,6 @@ export default function App() {
           </div>
           
           <div style={{ flex: 1, position: 'relative', display: 'grid' }}>
-            {/* Layer 1: Highlight Overlay */}
             <div style={{
                ...commonTextStyle,
                gridArea: '1 / 1',
@@ -768,7 +793,6 @@ export default function App() {
                <HighlightedText text={node.text} query={searchQuery} />
             </div>
 
-            {/* Layer 2: Interactive Textarea */}
             <textarea
               ref={el => { if(el && isEditing) adjustHeight(el); }}
               id={`input-${node.id}`}
@@ -776,7 +800,6 @@ export default function App() {
               onChange={(e) => { handleUpdateText(node.id, e.target.value); adjustHeight(e.target); }}
               onKeyDown={(e) => handleItemKeyDown(e, node)}
               onFocus={() => { setFocusId(node.id); }}
-              // Restore blur handler with safety check
               onBlur={() => handleBlur(node.id)}
               rows={1}
               style={{
@@ -816,7 +839,7 @@ export default function App() {
              {idx > 0 && " > "}
              <span 
                style={{ cursor: 'pointer', textDecoration: 'underline', color: theme.highlight }} 
-               onClick={() => { setViewRootId(node.id); setFocusId(node.id); }}
+               onClick={() => { setViewRootId(node.id); setFocusId(node.id); cursorGoalRef.current = 'start'; }}
                title={node.text}
              >
                {truncate(node.text, 30) || 'Home'}
@@ -887,7 +910,7 @@ export default function App() {
                  />
                ) : (
                  <div 
-                   onClick={() => { setFocusId(currentViewNode.id); setFocusTrigger(t => t+1); }}
+                   onClick={() => { setFocusId(currentViewNode.id); cursorGoalRef.current = 'start'; setFocusTrigger(t => t+1); }}
                    style={{ fontSize: '1.8rem', fontWeight: 'bold', color: theme.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text' }}
                  >
                    {currentViewNode.text || 'Untitled'}
